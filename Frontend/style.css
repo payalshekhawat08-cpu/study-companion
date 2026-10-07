@@ -1,0 +1,15 @@
+body { font-family: Georgia, serif; max-width: 900px; margin: 40px auto; background: #faf8f5; color: #222; }
+.msg { margin: 12px 0; padding: 12px 14px; border-radius: 8px; background: #fff; border: 1px solid #e3ded6; }
+.msg.user { background: #efe9df; }
+.cite { display: inline-block; margin: 8px 6px 0 0; padding: 3px 10px; font-size: 13px;
+        border: 1px solid #2f6f5e; color: #2f6f5e; border-radius: 12px; cursor: pointer; }
+.input-row { display: flex; gap: 8px; }
+input { flex: 1; padding: 10px; }
+button { padding: 10px 16px; }
+nav { display: flex; gap: 8px; margin-bottom: 20px; }
+.tab.active { background: #b85c38; color: #fff; }
+.hidden { display: none; }
+.bar-row { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
+.bar-row span { width: 80px; }
+.bar { flex: 1; height: 10px; background: #e3ded6; border-radius: 5px; }
+.bar div { height: 100%; background: #b85c38; border-radius: 5px; }

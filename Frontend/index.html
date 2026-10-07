@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Study Companion</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <nav>
+    <button class="tab active" data-view="chat">Chat</button>
+    <button class="tab" data-view="quiz">Quiz</button>
+    <button class="tab" data-view="dashboard">Dashboard</button>
+  </nav>
+
+  <section id="view-chat" class="view">
+    <div id="chat"></div>
+    <div class="input-row">
+      <input id="question" placeholder="Ask about your material...">
+      <button id="send">Ask</button>
+    </div>
+  </section>
+
+  <section id="view-quiz" class="view hidden">
+    <h2>Quick quiz</h2>
+    <p>Which structure is last-in, first-out?</p>
+    <button class="option">Queue</button>
+    <button class="option">Stack</button>
+    <p id="quiz-feedback"></p>
+  </section>
+
+  <section id="view-dashboard" class="view hidden">
+    <h2>Your mastery</h2>
+    <div class="bar-row"><span>Stacks</span><div class="bar"><div style="width:80%"></div></div></div>
+    <div class="bar-row"><span>Queues</span><div class="bar"><div style="width:35%"></div></div></div>
+  </section>
+
+  <script src="script.js"></script>
+</body>
+</html>
