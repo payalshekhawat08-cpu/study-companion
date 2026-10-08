@@ -29,3 +29,29 @@ and a learner model.
 - Beginner team. Keep code simple, with short comments explaining each part.
 - Very limited internet: do not add packages beyond requirements.txt without asking.
 - Do not use local embedding models or anything that downloads PyTorch.
+## Team rules
+- Backend owner works only in backend/. Frontend owner works only in Frontend/.
+  Never edit the other person's folder.
+- Never commit .env or any API key.
+- Do not add packages without asking the team first.
+- Do not change the API contract below on your own. Tell the other person first,
+  then update this file.
+- Run git pull before starting work and git push when finished.
+
+## API contract (frontend <-> backend) - draft, change only by agreement
+Every answer carries citations: { id, label, source_file,
+source_type: "pdf" | "slide" | "video", location, excerpt }
+(location = page number, slide number, or seconds for video).
+If the material doesn't cover a question, the backend says grounded: false.
+
+- POST /upload              -> { file_id, status }
+- GET  /library             -> list of sources with their topics
+- POST /ask {question}      -> { answer, grounded, citations: [...] }
+- POST /quiz {topics, types, count} -> list of { id, type, question, options,
+                                topic, source, difficulty }
+- POST /quiz/answer {id, answer}    -> { correct, feedback, citation }
+- GET  /mastery             -> { topics: [{ name, mastery }], weak: [...] }
+
+## Current status (update after every finished step)
+- Backend: /health works. Next: PDF ingestion.
+- Frontend: (teammate fills in)
