@@ -2,7 +2,7 @@
 // LATER: replace its body with a fetch() call to your Python server.
 function fakeAsk(question) {
   return {
-    answer: "My name is neha.",
+    answer: "My name is payal.",
     citations: ["Textbook p.12", "Lecture video 14:32"]
   };
 }
