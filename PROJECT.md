@@ -30,6 +30,17 @@ and a learner model.
 - Very limited internet: do not add packages beyond requirements.txt without asking.
 - Do not use local embedding models or anything that downloads PyTorch.
 - Frontend packages are limited to the list in Frontend/FRONTEND_PLAN.md. Backend packages are limited to requirements.txt.
+- Backend must allow CORS from the frontend (http://localhost:5173 and
+  http://127.0.0.1:5173), including the X-Student-Id header. Use FastAPI's built-in
+  CORSMiddleware (no new package).
+- File upload in FastAPI needs the `python-multipart` package. Check it is in
+  requirements.txt before using /upload.
+- Frontend settings (VITE_USE_MOCK, VITE_API_URL) live in Frontend/.env, which must be
+  git-ignored. NEVER put the Gemini key, or any secret, in a variable starting with
+  VITE_ (the browser can read it).
+- Cost safety: use a Gemini key from a project on the free tier (no billing linked).
+  Do not retry automatically after a 429. Test with small files first. Run RAGAS
+  evaluation on a small test set only (it makes many AI calls).
 ## Team rules
 - Backend owner works only in backend/. Frontend owner works only in Frontend/.
   Never edit the other person's folder.
@@ -40,7 +51,9 @@ and a learner model.
 - Run git pull before starting work and git push when finished.
 - If Frontend/FRONTEND_PLAN.md and this file disagree, this file wins. Tell the other person and fix whichever one is wrong.
 - Only the backend decides whether a quiz answer is correct. Question data never contains the answer; it is sent back only after the student answers.
-
+- AI assistants (Copilot) never run git commit or git push and never edit PROJECT.md.
+  The human owner does git pull / git push, updates "Current status", and edits
+  the API contract here after agreeing with the other person.
 
 ## API contract (frontend <-> backend) - change only by agreement
 Every request carries the header X-Student-Id (a random id from the frontend; the
@@ -77,6 +90,19 @@ Example labels: "Textbook p.12", "Lecture 1, 14:32".
          streak_days (optional) }
 - GET  /topics  (optional, only for the course map)
     -> list of { name, prerequisites: [names] }
+    ### Contract clarifications (agreed, not new endpoints)
+- `source_ids` (in /ask and /quiz) are `file_id` values from GET /library.
+  Empty list = all sources. `topics` are topic names exactly as returned by GET /library.
+- Starter quiz: when `diagnostic: true`, the backend ignores `count`, `types` and
+  `difficulty`, and returns exactly 5 MCQ questions covering the topics of all
+  "ready" sources. (MCQ only keeps it fast and cheap.)
+- `count` is limited to 3-15. The backend must reject or cap anything above 15.
+- GET /files/{file_id} is loaded directly by the browser (PDF viewer, video player),
+  which cannot send custom headers. The backend must NOT require X-Student-Id there.
+- These endpoints only read stored data and must NEVER call the Gemini API:
+  GET /library, GET /files/{file_id}, GET /mastery, GET /topics.
+- X-Student-Id: the backend must use it to keep each student's mastery separate
+  (needed for simulated students in the evaluation).
 
 - ## Current status (update after every finished step)
 - Backend: /health works, Gemini key is set up locally. Next: PDF ingestion.
