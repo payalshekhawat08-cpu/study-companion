@@ -18,7 +18,7 @@ and a learner model.
    on a test set, plus simulated students across sessions.
 
 ## Tech stack (final)
-- Frontend: plain HTML, CSS, JavaScript (folder: frontend/), already started with fake data
+- Frontend: React + Vite + Tailwind CSS, shadcn/ui, Framer Motion, Recharts, react-confetti, react-pdf (folder: Frontend/). Full build plan: Frontend/FRONTEND_PLAN.md. The frontend never calls an AI model and never holds an API key. It talks to the backend only through the API contract below.
 - Backend: Python + FastAPI (folder: backend/)
 - AI + embeddings: Gemini API (free tier), key stored in .env, never committed
 - Vector DB: ChromaDB (local). Learner data: SQLite
@@ -29,6 +29,7 @@ and a learner model.
 - Beginner team. Keep code simple, with short comments explaining each part.
 - Very limited internet: do not add packages beyond requirements.txt without asking.
 - Do not use local embedding models or anything that downloads PyTorch.
+- Frontend packages are limited to the list in Frontend/FRONTEND_PLAN.md. Backend packages are limited to requirements.txt.
 ## Team rules
 - Backend owner works only in backend/. Frontend owner works only in Frontend/.
   Never edit the other person's folder.
@@ -37,21 +38,46 @@ and a learner model.
 - Do not change the API contract below on your own. Tell the other person first,
   then update this file.
 - Run git pull before starting work and git push when finished.
+- If Frontend/FRONTEND_PLAN.md and this file disagree, this file wins. Tell the other person and fix whichever one is wrong.
+- Only the backend decides whether a quiz answer is correct. Question data never contains the answer; it is sent back only after the student answers.
 
-## API contract (frontend <-> backend) - draft, change only by agreement
-Every answer carries citations: { id, label, source_file,
-source_type: "pdf" | "slide" | "video", location, excerpt }
-(location = page number, slide number, or seconds for video).
-If the material doesn't cover a question, the backend says grounded: false.
 
-- POST /upload              -> { file_id, status }
-- GET  /library             -> list of sources with their topics
-- POST /ask {question}      -> { answer, grounded, citations: [...] }
-- POST /quiz {topics, types, count} -> list of { id, type, question, options,
-                                topic, source, difficulty }
-- POST /quiz/answer {id, answer}    -> { correct, feedback, citation }
-- GET  /mastery             -> { topics: [{ name, mastery }], weak: [...] }
+## API contract (frontend <-> backend) - change only by agreement
+Every request carries the header X-Student-Id (a random id from the frontend; the
+backend may ignore it). Errors: the backend returns a normal HTTP error status;
+use 429 for quota limits.
 
-## Current status (update after every finished step)
-- Backend: /health works. Next: PDF ingestion.
-- Frontend: (teammate fills in)
+Citation object (used everywhere):
+{ id, label, file_id, source_file, source_type: "pdf" | "slide" | "video",
+  location, excerpt }
+location = page number (pdf), slide number (slide), seconds (video).
+Example labels: "Textbook p.12", "Lecture 1, 14:32".
+
+- POST /upload  (multipart "file", OR JSON {youtube_url})
+    -> { file_id, status: "processing" }
+- GET  /library
+    -> list of { file_id, name, source_type, status: "processing"|"ready"|"failed",
+                 topics: [...], video_url (YouTube only, else null) }
+- GET  /files/{file_id}
+    -> the original uploaded file (used by the frontend source viewer)
+- POST /ask { question, source_ids: [] }   (empty list = all sources)
+    -> { answer, grounded, citations: [citation, ...] }
+    If not covered: grounded: false, citations: [], answer says it isn't covered.
+- POST /quiz { topics: [], source_ids: [], types: ["mcq","short","numerical"],
+               count, difficulty: "easy"|"medium"|"hard"|"mixed", diagnostic: false }
+    -> list of { id, type, question, options (mcq only), topic, difficulty,
+                 source: citation }       (never contains the correct answer)
+- POST /quiz/answer { question_id, answer }
+    answer = option index (mcq), text (short), number (numerical)
+    -> { correct, feedback, citation, correct_answer (optional),
+         misconception (optional) }
+- GET  /mastery
+    -> { topics: [{ name, mastery 0..1 }], weak: [...],
+         has_history (optional), history: [{ date, mastery }] (optional),
+         streak_days (optional) }
+- GET  /topics  (optional, only for the course map)
+    -> list of { name, prerequisites: [names] }
+
+- ## Current status (update after every finished step)
+- Backend: /health works, Gemini key is set up locally. Next: PDF ingestion.
+- Frontend: building from Frontend/FRONTEND_PLAN.md, phase by phase, with mock data (teammate updates this line).
