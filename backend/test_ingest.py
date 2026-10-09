@@ -67,6 +67,7 @@ def main():
     if len(sys.argv) != 2:
         raise SystemExit("Usage: python test_ingest.py <path-to-pdf>")
 
+    sys.stdout.reconfigure(errors="replace")
     initialize_store()
     pdf_path = Path(sys.argv[1]).expanduser().resolve()
     try:

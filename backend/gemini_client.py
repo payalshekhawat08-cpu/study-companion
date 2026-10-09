@@ -54,38 +54,40 @@ def embed_batches(
     client = _make_client()
 
     for start in range(0, len(texts), BATCH_SIZE):
-        if start:
-            time.sleep(BATCH_PAUSE_SECONDS)
+        batch = texts[start : start + BATCH_SIZE]
+        vectors = []
+        for batch_index, text in enumerate(batch):
+            if start + batch_index:
+                time.sleep(BATCH_PAUSE_SECONDS)
 
-        batch = [prefix + text for text in texts[start : start + BATCH_SIZE]]
-        try:
-            response = client.models.embed_content(
-                model=MODEL_NAME,
-                contents=batch,
-            )
-        except Exception as exc:
-            api_key = os.getenv("GEMINI_API_KEY", "")
-            message = str(exc).replace(api_key, "[redacted]") if api_key else str(exc)
-            lowered_message = message.lower()
-            status_code = getattr(exc, "code", None)
-            is_quota_error = status_code == 429 or any(
-                marker in lowered_message
-                for marker in ("quota", "resource_exhausted", "rate limit", "too many requests")
-            )
-            if is_quota_error:
-                raise GeminiQuotaError(
-                    "Gemini quota reached, try again in a few minutes."
+            try:
+                response = client.models.embed_content(
+                    model=MODEL_NAME,
+                    contents=prefix + text,
+                )
+            except Exception as exc:
+                api_key = os.getenv("GEMINI_API_KEY", "")
+                message = str(exc).replace(api_key, "[redacted]") if api_key else str(exc)
+                lowered_message = message.lower()
+                status_code = getattr(exc, "code", None)
+                is_quota_error = status_code == 429 or any(
+                    marker in lowered_message
+                    for marker in ("quota", "resource_exhausted", "rate limit", "too many requests")
+                )
+                if is_quota_error:
+                    raise GeminiQuotaError(
+                        "Gemini quota reached, try again in a few minutes."
+                    ) from exc
+                raise GeminiEmbeddingError(
+                    f"Gemini could not create embeddings: {message}"
                 ) from exc
-            raise GeminiEmbeddingError(
-                f"Gemini could not create embeddings: {message}"
-            ) from exc
 
-        response_embeddings = response.embeddings or []
-        vectors = [embedding.values for embedding in response_embeddings]
-        if len(vectors) != len(batch) or any(vector is None for vector in vectors):
-            raise GeminiEmbeddingError(
-                "Gemini returned an incomplete set of embeddings."
-            )
+            response_embeddings = response.embeddings or []
+            if len(response_embeddings) != 1 or not response_embeddings[0].values:
+                raise GeminiEmbeddingError(
+                    "Gemini returned an incomplete embedding."
+                )
+            vectors.append(response_embeddings[0].values)
 
         yield start, vectors
 
