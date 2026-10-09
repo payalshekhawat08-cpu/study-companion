@@ -1,0 +1,19 @@
+# Copilot Rules for This Project
+
+## Always do first
+- Read `PROJECT.md` in the repo root before generating or changing any code.
+- If a request conflicts with PROJECT.md, STOP and tell me instead of proceeding.
+
+## Hard constraints
+- Do NOT change the tech stack, framework, language versions, or package manager.
+- Do NOT add new dependencies or libraries without asking me first.
+- Do NOT modify anything inside `/backend` (or the files I list as protected) unless I explicitly say so.
+- Do NOT rename, move, or delete existing files/folders.
+- Do NOT change existing API routes, request/response shapes, or env variable names.
+- Frontend must only talk to the backend through the endpoints documented in PROJECT.md.
+
+## Working style
+- Make the smallest change that does the job; touch only the files I name.
+- Before big changes, give me a short plan and the list of files you'll create/edit, then wait for approval.
+- Match the existing code style and folder structure.
+- If something is unclear or missing in PROJECT.md, ask me. Don't guess or invent endpoints.
