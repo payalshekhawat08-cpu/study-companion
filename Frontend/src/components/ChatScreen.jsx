@@ -93,6 +93,7 @@ export default function ChatScreen({
   onBrowseLibrary,
   onQuizSources,
 }) {
+  const reduceMotion = useReducedMotion();
   const [selectedSourceIds, setSelectedSourceIds] = useState(initialSourceIds);
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState([]);
@@ -102,8 +103,10 @@ export default function ChatScreen({
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    messagesEndRef.current?.scrollIntoView({
+      behavior: reduceMotion === false ? "smooth" : "auto",
+    });
+  }, [messages, reduceMotion]);
 
   function toggleSource(sourceId) {
     setSelectedSourceIds((current) =>
