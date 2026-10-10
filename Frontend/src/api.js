@@ -104,8 +104,17 @@ export function getFile(fileId) {
   );
 }
 
+export function getFileUrl(file_id, source_type) {
+  if (useMock) {
+    if (source_type === "pdf") return "/samples/sample.pdf";
+    if (source_type === "video") return "/samples/sample.mp4";
+    return null;
+  }
+  return `${apiUrl}/files/${file_id}`;
+}
+
 export function askQuestion(question, sourceIds = []) {
-  if (useMock) return mockAsk(question);
+  if (useMock) return mockAsk(question, sourceIds);
   return requestJson("/ask", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

@@ -235,12 +235,13 @@ export async function mockGetFile() {
   return null;
 }
 
-export async function mockAsk(question) {
+export async function mockAsk(question, source_ids = []) {
   await delay();
   const text = question.toLowerCase();
+  let response;
 
   if (text.includes("stack")) {
-    return {
+    response = {
       answer:
         "A stack follows last-in, first-out (LIFO): the most recently added item is removed first.",
       grounded: true,
@@ -265,10 +266,8 @@ export async function mockAsk(question) {
         },
       ],
     };
-  }
-
-  if (text.includes("queue")) {
-    return {
+  } else if (text.includes("queue")) {
+    response = {
       answer:
         "A queue follows first-in, first-out order: items leave in the order they arrive.",
       grounded: true,
@@ -284,13 +283,28 @@ export async function mockAsk(question) {
         },
       ],
     };
+  } else {
+    response = {
+      answer: "This isn't covered in your material.",
+      grounded: false,
+      citations: [],
+    };
   }
 
-  return {
-    answer: "This isn't covered in your material.",
-    grounded: false,
-    citations: [],
-  };
+  if (source_ids.length === 0) return response;
+
+  const citations = response.citations.filter((citation) =>
+    source_ids.includes(citation.file_id),
+  );
+  if (citations.length === 0) {
+    return {
+      answer: "This isn't covered in your material.",
+      grounded: false,
+      citations: [],
+    };
+  }
+
+  return { ...response, citations };
 }
 
 export async function mockGetQuiz({
