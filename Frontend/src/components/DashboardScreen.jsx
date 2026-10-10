@@ -59,12 +59,14 @@ export default function DashboardScreen({
             </p>
           )}
         </div>
-        {typeof mastery?.streak_days !== "undefined" && (
-          <div className="streak-indicator">
-            <Flame size={16} aria-hidden="true" />
-            <span>{mastery.streak_days} day streak</span>
-          </div>
-        )}
+        {mastery &&
+          Object.prototype.hasOwnProperty.call(mastery, "streak_days") &&
+          Number.isFinite(mastery.streak_days) && (
+            <div className="streak-indicator">
+              <Flame size={16} aria-hidden="true" />
+              <span>{mastery.streak_days} day streak</span>
+            </div>
+          )}
       </header>
 
       <div className="dashboard-grid">
