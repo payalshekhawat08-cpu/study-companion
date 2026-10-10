@@ -55,16 +55,21 @@ function getTopicBreakdown(answers) {
 export default function QuizScreen({
   sources,
   initialSourceIds = [],
+  initialTopics = [],
   starterQuiz = null,
   onDashboard,
 }) {
   const reduceMotion = useReducedMotion();
   const [phase, setPhase] = useState(starterQuiz ? "taking" : "setup");
   const [scope, setScope] = useState(
-    initialSourceIds.length ? "sources" : "all",
+    initialTopics.length
+      ? "topics"
+      : initialSourceIds.length
+        ? "sources"
+        : "all",
   );
   const [sourceIds, setSourceIds] = useState(initialSourceIds);
-  const [selectedTopics, setSelectedTopics] = useState([]);
+  const [selectedTopics, setSelectedTopics] = useState(initialTopics);
   const [types, setTypes] = useState(["mcq", "short", "numerical"]);
   const [count, setCount] = useState("5");
   const [difficulty, setDifficulty] = useState("mixed");

@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { getLibrary, getMastery, getQuiz } from "@/api";
 import ChatScreen from "@/components/ChatScreen.jsx";
 import QuizScreen from "@/components/QuizScreen.jsx";
+import DashboardScreen from "@/components/DashboardScreen.jsx";
 
 const navigation = [
   { id: "home", label: "Home", icon: House },
@@ -31,6 +32,7 @@ const goals = [
 const nameKey = "study-companion-name";
 const goalKey = "study-companion-goal";
 const lastScreenKey = "study-companion-last-screen";
+const continueScreenKey = "study-companion-continue-screen";
 
 function getSavedValue(key) {
   try {
@@ -179,7 +181,6 @@ function PlaceholderScreen({
   screen,
   name,
   goal,
-  quizSourceIds,
   onNavigate,
 }) {
   const goalLabels = {
@@ -208,9 +209,7 @@ function PlaceholderScreen({
     quiz: {
       title: "Quiz",
       description: "Practice with questions based on your material.",
-      next: quizSourceIds.length
-      ? `Quiz setup will use ${quizSourceIds.length} selected source${quizSourceIds.length === 1 ? "" : "s"}.`
-      : "Choose material and question types to get started.",
+      next: "Choose material and question types to get started.",
     },
     progress: {
       title: "Your progress",
@@ -250,6 +249,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [startingDiagnostic, setStartingDiagnostic] = useState(false);
   const [quizSourceIds, setQuizSourceIds] = useState([]);
+  const [quizTopics, setQuizTopics] = useState([]);
   const [starterQuiz, setStarterQuiz] = useState(null);
 
   useEffect(() => {
@@ -290,12 +290,40 @@ export default function App() {
 
   function navigate(nextScreen) {
     if (nextScreen !== "quiz") setStarterQuiz(null);
+    if (["library", "chat", "quiz"].includes(nextScreen)) {
+      try {
+        localStorage.setItem(continueScreenKey, nextScreen);
+      } catch (error) {
+        console.error("Unable to save the continue-learning destination.", error);
+      }
+    }
     setScreen(nextScreen);
   }
 
   function openQuizWithSources(sourceIds) {
+    setQuizTopics([]);
     setQuizSourceIds(sourceIds);
     navigate("quiz");
+  }
+
+  function openQuizWithTopic(topic) {
+    setQuizSourceIds([]);
+    setQuizTopics([topic]);
+    navigate("quiz");
+  }
+
+  async function returnToDashboard() {
+    try {
+      const [sources, progress] = await Promise.all([
+        getLibrary(),
+        getMastery(),
+      ]);
+      setLibrary(sources);
+      setMastery(progress);
+    } catch (error) {
+      toast.error(error.message || "Could not refresh your progress.");
+    }
+    navigate("home");
   }
 
   function saveWelcome(firstName, selectedGoal) {
@@ -406,7 +434,19 @@ export default function App() {
           {name && <span className="profile-name">{name}</span>}
         </header>
         <main className="page-content">
-          {screen === "chat" ? (
+          {screen === "home" || screen === "progress" ? (
+            <DashboardScreen
+              name={name}
+              mastery={mastery}
+              library={library}
+              loading={loading}
+              lastScreen={getSavedValue(continueScreenKey)}
+              onNavigate={navigate}
+              onPracticeTopic={openQuizWithTopic}
+              onAddMaterial={() => navigate("library")}
+              progressView={screen === "progress"}
+            />
+          ) : screen === "chat" ? (
             <ChatScreen
               sources={library}
               onBrowseLibrary={() => navigate("library")}
@@ -416,15 +456,15 @@ export default function App() {
             <QuizScreen
               sources={library}
               initialSourceIds={quizSourceIds}
+              initialTopics={quizTopics}
               starterQuiz={starterQuiz}
-              onDashboard={() => navigate("home")}
+              onDashboard={returnToDashboard}
             />
           ) : (
             <PlaceholderScreen
               screen={screen}
               name={name}
               goal={goal}
-              quizSourceIds={quizSourceIds}
               onNavigate={navigate}
             />
           )}
