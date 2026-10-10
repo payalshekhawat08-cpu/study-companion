@@ -58,6 +58,11 @@ def health_check():
     return {"status": "ok"}
 
 
+@app.get("/")
+def root():
+    return {"status": "ok", "docs": "/docs"}
+
+
 def _youtube_video_id(url: str) -> str:
     try:
         parsed = urlparse(url)
