@@ -105,5 +105,5 @@ Example labels: "Textbook p.12", "Lecture 1, 14:32".
   (needed for simulated students in the evaluation).
 
 - ## Current status (update after every finished step)
-- Backend: /health works, Gemini key is set up locally. Next: PDF ingestion.
+- Backend:- /health, PDF ingestion (with retries) and grounded /ask work. Next: slides and YouTube ingestion, then quizzes.
 - Frontend: building from Frontend/FRONTEND_PLAN.md, phase by phase, with mock data (teammate updates this line).
