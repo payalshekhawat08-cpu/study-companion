@@ -165,6 +165,40 @@ const questions = [
       excerpt: "Dequeue removes an item from the front of the queue.",
     },
   },
+  {
+    id: "q9",
+    type: "mcq",
+    question: "Which operation removes the top item from a stack?",
+    options: ["Enqueue", "Dequeue", "Pop", "Peek"],
+    topic: "Stacks",
+    difficulty: "medium",
+    source: {
+      id: "c9",
+      label: "Course Notes p.13",
+      file_id: "f_pdf",
+      source_file: library[0].name,
+      source_type: "pdf",
+      location: 13,
+      excerpt: "Pop removes the most recently added item from a stack.",
+    },
+  },
+  {
+    id: "q10",
+    type: "mcq",
+    question: "Which queue operation adds a new item?",
+    options: ["Pop", "Push", "Enqueue", "Dequeue"],
+    topic: "Queues",
+    difficulty: "easy",
+    source: {
+      id: "c10",
+      label: "Course Notes p.18",
+      file_id: "f_pdf",
+      source_file: library[0].name,
+      source_type: "pdf",
+      location: 18,
+      excerpt: "Enqueue adds an item to the back of the queue.",
+    },
+  },
 ];
 
 const answers = {
@@ -176,6 +210,8 @@ const answers = {
   q6: { correctAnswer: 3, displayAnswer: "3" },
   q7: { correctAnswer: 1, displayAnswer: "Selection sort" },
   q8: { correctAnswer: "dequeue", displayAnswer: "Dequeue" },
+  q9: { correctAnswer: 2, displayAnswer: "Pop" },
+  q10: { correctAnswer: 2, displayAnswer: "Enqueue" },
 };
 
 const mastery = {

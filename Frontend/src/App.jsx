@@ -12,6 +12,7 @@ import { Toaster, toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { getLibrary, getMastery, getQuiz } from "@/api";
 import ChatScreen from "@/components/ChatScreen.jsx";
+import QuizScreen from "@/components/QuizScreen.jsx";
 
 const navigation = [
   { id: "home", label: "Home", icon: House },
@@ -208,8 +209,8 @@ function PlaceholderScreen({
       title: "Quiz",
       description: "Practice with questions based on your material.",
       next: quizSourceIds.length
-        ? `Quiz setup will use ${quizSourceIds.length} selected source${quizSourceIds.length === 1 ? "" : "s"}. Quiz setup and answering arrive in Phase 4.`
-        : "Quiz setup and answering arrive in Phase 4.",
+      ? `Quiz setup will use ${quizSourceIds.length} selected source${quizSourceIds.length === 1 ? "" : "s"}.`
+      : "Choose material and question types to get started.",
     },
     progress: {
       title: "Your progress",
@@ -249,6 +250,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [startingDiagnostic, setStartingDiagnostic] = useState(false);
   const [quizSourceIds, setQuizSourceIds] = useState([]);
+  const [starterQuiz, setStarterQuiz] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -287,6 +289,7 @@ export default function App() {
     mastery?.has_history ?? (mastery ? mastery.topics.length > 0 : false);
 
   function navigate(nextScreen) {
+    if (nextScreen !== "quiz") setStarterQuiz(null);
     setScreen(nextScreen);
   }
 
@@ -322,8 +325,12 @@ export default function App() {
         difficulty: "mixed",
         diagnostic: true,
       });
+      if (questions.length !== 5) {
+        toast.error("The starter quiz could not load five questions. Please try again.");
+        return;
+      }
+      setStarterQuiz({ questions, diagnostic: true });
       navigate("quiz");
-      toast.success(`Starter quiz ready: ${questions.length} questions.`);
     } catch (error) {
       toast.error(error.message || "Could not prepare the starter quiz.");
     } finally {
@@ -404,6 +411,13 @@ export default function App() {
               sources={library}
               onBrowseLibrary={() => navigate("library")}
               onQuizSources={openQuizWithSources}
+            />
+          ) : screen === "quiz" ? (
+            <QuizScreen
+              sources={library}
+              initialSourceIds={quizSourceIds}
+              starterQuiz={starterQuiz}
+              onDashboard={() => navigate("home")}
             />
           ) : (
             <PlaceholderScreen
