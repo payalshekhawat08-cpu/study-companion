@@ -17,13 +17,13 @@ from config import (
     PDF_CHUNK_OVERLAP,
     PDF_CHUNK_SIZE,
     SLIDE_CHUNK_SIZE,
-    TOPIC_TAGGING_SINGLE_CALL_MAX_CHUNKS,
     TOPIC_TAGGING_SNIPPET_SIZE,
     VIDEO_FILE_MAX_SIZE,
     VIDEO_OVERLAP_SECONDS,
     VIDEO_WINDOW_SECONDS,
 )
 from gemini_client import (
+    GeminiError,
     GeminiQuotaError,
     embed_batches,
     generate_json,
@@ -43,7 +43,9 @@ from store import (
     save_image_description,
     save_topic_tags,
     save_transcript,
+    record_source_chunk_progress,
     set_source_status,
+    set_source_chunk_total,
     set_source_topics,
     update_chunk_tags,
 )
@@ -233,6 +235,8 @@ def _store_chunks(chunks: list[dict], source_name: str):
     missing_chunks = [
         chunk for chunk in chunks if chunk["chunk_id"] not in stored_ids
     ]
+    if chunks:
+        record_source_chunk_progress(chunks[0]["file_id"])
     missing_texts = [chunk["text"] for chunk in missing_chunks]
     for start, embeddings in embed_batches(
         missing_texts,
@@ -240,6 +244,7 @@ def _store_chunks(chunks: list[dict], source_name: str):
         title=source_name,
     ):
         save_chunks([missing_chunks[start]], embeddings)
+        record_source_chunk_progress(missing_chunks[start]["file_id"])
 
 
 def _parse_json(response: str, description: str):
@@ -252,110 +257,115 @@ def _parse_json(response: str, description: str):
     return parsed
 
 
-def _tag_source(file_id: str, source_name: str):
+def _tag_source(file_id: str):
+    stored_chunks = get_file_chunks(file_id)
     chunks = [
-        chunk for chunk in get_file_chunks(file_id)
+        chunk for chunk in stored_chunks
         if not chunk["metadata"].get("topic")
     ]
     if not chunks:
-        set_source_topics(file_id, [])
+        set_source_topics(
+            file_id,
+            sorted(
+                {
+                    chunk["metadata"]["topic"]
+                    for chunk in stored_chunks
+                    if chunk["metadata"].get("topic")
+                }
+            ),
+        )
         return
     known_topics = get_topic_names()
-    if len(chunks) > TOPIC_TAGGING_SINGLE_CALL_MAX_CHUNKS:
-        midpoint = (len(chunks) + 1) // 2
-        batches = [chunks[:midpoint], chunks[midpoint:]]
-    else:
-        batches = [chunks]
-    for batch in batches:
-        supplied = [
-            {
-                "id": chunk["chunk_id"],
-                "text": " ".join(chunk["text"].split())[
-                    :TOPIC_TAGGING_SNIPPET_SIZE
-                ],
-            }
-            for chunk in batch
-        ]
-        response = generate_json(
-            TOPIC_TAGGING_PROMPT.format(
-                existing_topics=json.dumps(known_topics),
-                chunks=json.dumps(supplied),
-            )
-        )
-        parsed = _parse_json(response, "topic tags")
-        tagged = parsed.get("chunks")
-        topic_rows = parsed.get("topics")
-        if not isinstance(tagged, list) or not isinstance(topic_rows, list):
-            raise ValueError("Gemini returned incomplete topic tags.")
-        supplied_ids = {chunk["chunk_id"] for chunk in batch}
-        normalized = {}
-        for item in tagged:
-            if (
-                not isinstance(item, dict)
-                or not isinstance(item.get("id"), str)
-                or item["id"] not in supplied_ids
-            ):
-                continue
-            topic = item.get("topic")
-            concepts = item.get("concepts")
-            if not isinstance(topic, str) or not topic.strip():
-                raise ValueError("Gemini returned an empty topic name.")
-            if not isinstance(concepts, list) or any(
-                not isinstance(concept, str) for concept in concepts
-            ):
-                raise ValueError("Gemini returned invalid topic concepts.")
-            normalized[item["id"]] = {
-                "chunk_id": item["id"],
-                "topic": topic.strip(),
-                "concepts": concepts,
-            }
-        if set(normalized) != supplied_ids:
-            raise ValueError("Gemini did not tag every chunk in the batch.")
-
-        clean_topic_rows = []
-        for item in topic_rows:
-            if not isinstance(item, dict):
-                raise ValueError("Gemini returned an invalid topic prerequisite.")
-            name = item.get("name")
-            prerequisites = item.get("prerequisites")
-            if not isinstance(name, str) or not name.strip():
-                raise ValueError("Gemini returned an empty topic name.")
-            if not isinstance(prerequisites, list) or any(
-                not isinstance(value, str) or not value.strip()
-                for value in prerequisites
-            ):
-                raise ValueError("Gemini returned invalid topic prerequisites.")
-            clean_topic_rows.append(
-                {"name": name.strip(), "prerequisites": prerequisites}
-            )
-        reported_topics = {item["name"].casefold() for item in clean_topic_rows}
-        if any(
-            item["topic"].casefold() not in reported_topics
-            for item in normalized.values()
-        ):
-            raise ValueError("Gemini omitted prerequisite data for a chunk topic.")
-
-        canonical_topics = save_topic_tags(
-            list(normalized.values()),
-            clean_topic_rows,
-        )
-        for chunk in batch:
-            tag = normalized[chunk["chunk_id"]]
-            update_chunk_tags(
-                chunk["chunk_id"],
-                canonical_topics[chunk["chunk_id"]],
-                tag["concepts"],
-            )
-        known_topics = get_topic_names()
-
-    topic_names = sorted(
+    supplied = [
         {
-            chunk["metadata"]["topic"]
-            for chunk in get_file_chunks(file_id)
-            if chunk["metadata"].get("topic")
+            "number": number,
+            "text": " ".join(chunk["text"].split())[:TOPIC_TAGGING_SNIPPET_SIZE],
         }
+        for number, chunk in enumerate(chunks, start=1)
+    ]
+    response = generate_json(
+        TOPIC_TAGGING_PROMPT.format(
+            existing_topics=json.dumps(known_topics),
+            chunks=json.dumps(supplied),
+        )
     )
-    set_source_topics(file_id, topic_names)
+    parsed = _parse_json(response, "topic tags")
+    main_topics = parsed.get("topics")
+    tagged_chunks = parsed.get("chunks")
+    if not isinstance(main_topics, list) or not isinstance(tagged_chunks, list):
+        raise ValueError("Gemini returned incomplete topic tags.")
+    if any(not isinstance(topic, str) or not topic.strip() for topic in main_topics):
+        raise ValueError("Gemini returned an invalid main topic.")
+
+    topic_names = {}
+    for topic in main_topics:
+        name = topic.strip()
+        topic_names.setdefault(name.casefold(), name)
+    for existing in known_topics:
+        if existing.casefold() in topic_names:
+            topic_names[existing.casefold()] = existing
+    if not topic_names:
+        raise ValueError("Gemini returned no main topics.")
+
+    tags_by_number = {}
+    for item in tagged_chunks:
+        if not isinstance(item, dict):
+            raise ValueError("Gemini returned an invalid chunk tag.")
+        number = item.get("number")
+        topics = item.get("topics")
+        if (
+            not isinstance(number, int)
+            or isinstance(number, bool)
+            or number < 1
+            or number > len(chunks)
+            or number in tags_by_number
+            or not isinstance(topics, list)
+            or not 1 <= len(topics) <= 3
+            or any(not isinstance(topic, str) for topic in topics)
+        ):
+            raise ValueError("Gemini returned an invalid chunk tag.")
+        normalized_topics = []
+        for topic in topics:
+            canonical = topic_names.get(topic.strip().casefold())
+            if canonical is None:
+                raise ValueError("Gemini used a chunk topic missing from main topics.")
+            if canonical not in normalized_topics:
+                normalized_topics.append(canonical)
+        if not normalized_topics:
+            raise ValueError("Gemini returned an empty chunk topic list.")
+        tags_by_number[number] = normalized_topics
+
+    if set(tags_by_number) != set(range(1, len(chunks) + 1)):
+        raise ValueError("Gemini did not tag every chunk.")
+
+    chunk_tags = [
+        {
+            "chunk_id": chunk["chunk_id"],
+            "topic": tags_by_number[number][0],
+        }
+        for number, chunk in enumerate(chunks, start=1)
+    ]
+    topic_rows = [
+        {"name": topic, "prerequisites": []}
+        for topic in topic_names.values()
+    ]
+    canonical_topics = save_topic_tags(chunk_tags, topic_rows)
+    for number, chunk in enumerate(chunks, start=1):
+        update_chunk_tags(
+            chunk["chunk_id"],
+            canonical_topics[chunk["chunk_id"]],
+            tags_by_number[number][1:],
+        )
+
+    stored_topics = {
+        chunk["metadata"]["topic"]
+        for chunk in get_file_chunks(file_id)
+        if chunk["metadata"].get("topic")
+    }
+    set_source_topics(
+        file_id,
+        sorted(stored_topics | set(topic_names.values())),
+    )
 
 
 def _process_transcript(file_id: str, source: dict, transcript: str):
@@ -405,8 +415,9 @@ def _process_transcript(file_id: str, source: dict, transcript: str):
                 "text": text,
             }
         )
+    set_source_chunk_total(file_id, len(chunks))
     _store_chunks(chunks, source["name"])
-    _tag_source(file_id, source["name"])
+    _tag_source(file_id)
     return len(chunks)
 
 
@@ -422,6 +433,25 @@ def _youtube_transcript(video_id: str) -> str:
         for item in transcript
     ]
     return json.dumps({"segments": segments})
+
+
+def _plain_error(exc: Exception) -> str:
+    if isinstance(exc, GeminiQuotaError):
+        return "Gemini quota limit reached, wait and try again later."
+    if isinstance(exc, GeminiError):
+        if exc.error_code == 504:
+            return "Gemini took too long to answer. Press retry in a minute."
+        stage = exc.stage.lower()
+        if "embedding" in stage:
+            if exc.error_code == 503:
+                return "Gemini is temporarily unavailable while embedding. Use retry."
+            return "Internet connection dropped while embedding. Use retry."
+        if exc.error_code == 503:
+            return "Gemini is temporarily unavailable during processing. Use retry."
+        return f"Gemini {stage} failed. Use retry."
+    if isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.lower():
+        return "Internet connection timed out during processing. Use retry."
+    return "Source processing failed. Use retry."
 
 
 def process_source(file_id: str):
@@ -442,6 +472,10 @@ def process_source(file_id: str):
                 file_id,
                 source["name"],
             )
+            total_chunks = len(chunks) + (
+                len(figures) if ENABLE_IMAGE_DESCRIPTIONS else 0
+            )
+            set_source_chunk_total(file_id, total_chunks)
             _store_chunks(chunks, source["name"])
             figure_pictures = [
                 (
@@ -454,7 +488,7 @@ def process_source(file_id: str):
             for figure, image_bytes, mime_type in figure_pictures:
                 figure["text_prefix"] = f"[Figure on page {figure['location']}] "
             _process_pictures(figure_pictures, PDF_FIGURE_PROMPT, source["name"])
-            _tag_source(file_id, source["name"])
+            _tag_source(file_id)
             set_source_status(file_id, "ready")
             return {
                 "status": "ready",
@@ -468,11 +502,15 @@ def process_source(file_id: str):
                 file_id,
                 source["name"],
             )
+            total_chunks = len(chunks) + (
+                len(pictures) if ENABLE_IMAGE_DESCRIPTIONS else 0
+            )
+            set_source_chunk_total(file_id, total_chunks)
             _store_chunks(chunks, source["name"])
             for picture, _, _ in pictures:
                 picture["text_prefix"] = f"[Image on slide {picture['location']}] "
             _process_pictures(pictures, SLIDE_IMAGE_PROMPT, source["name"])
-            _tag_source(file_id, source["name"])
+            _tag_source(file_id)
             set_source_status(file_id, "ready")
             return {
                 "status": "ready",
@@ -481,13 +519,14 @@ def process_source(file_id: str):
             }
         raise ValueError("This source type is not supported.")
     except GeminiQuotaError as exc:
-        set_source_status(file_id, "failed", str(exc))
-        logger.warning("Ingestion failed for %s: %s", file_id, exc)
-        return {"status": "failed", "error": str(exc)}
-    except Exception as exc:
-        message = f"Source processing failed: {exc}"
+        message = _plain_error(exc)
         set_source_status(file_id, "failed", message)
-        logger.error("Ingestion failed for %s: %s", file_id, message)
+        logger.warning("Ingestion failed for %s: %s", file_id, exc)
+        return {"status": "failed", "error": message}
+    except Exception as exc:
+        message = _plain_error(exc)
+        set_source_status(file_id, "failed", message)
+        logger.error("Ingestion failed for %s during %s: %s", file_id, getattr(exc, "stage", "processing"), exc)
         return {"status": "failed", "error": message}
 
 
@@ -517,11 +556,12 @@ def process_video_source(file_id: str, source: dict):
         set_source_status(file_id, "ready")
         return {"status": "ready", "chunks": count_file_chunks(file_id)}
     except GeminiQuotaError as exc:
-        set_source_status(file_id, "failed", str(exc))
-        logger.warning("Video ingestion failed for %s: %s", file_id, exc)
-        return {"status": "failed", "error": str(exc)}
-    except Exception as exc:
-        message = f"Video processing failed: {exc}"
+        message = _plain_error(exc)
         set_source_status(file_id, "failed", message)
-        logger.error("Video ingestion failed for %s: %s", file_id, message)
+        logger.warning("Video ingestion failed for %s: %s", file_id, exc)
+        return {"status": "failed", "error": message}
+    except Exception as exc:
+        message = _plain_error(exc)
+        set_source_status(file_id, "failed", message)
+        logger.error("Video ingestion failed for %s during %s: %s", file_id, getattr(exc, "stage", "processing"), exc)
         return {"status": "failed", "error": message}

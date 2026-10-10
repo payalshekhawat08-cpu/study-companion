@@ -1,4 +1,5 @@
 import json
+import re
 import sqlite3
 import time
 from datetime import datetime, timezone
@@ -28,6 +29,36 @@ def _pacific_date() -> str:
     return datetime.now(ZoneInfo("America/Los_Angeles")).date().isoformat()
 
 
+def _plain_library_error(error: str) -> str:
+    lowered = error.lower()
+    if "restart" in lowered:
+        return "Interrupted by a server restart"
+    if "429" in lowered or "quota" in lowered:
+        return "Gemini quota limit reached, wait and try again later."
+    if (
+        "504" in lowered
+        or "deadline_exceeded" in lowered
+        or "gemini took too long" in lowered
+    ):
+        return "Gemini took too long to answer. Press retry in a minute."
+    if "timeout" in lowered or "timed out" in lowered:
+        return "Internet connection timed out. Use retry."
+    if any(
+        marker in lowered
+        for marker in (
+            "disconnected",
+            "connection reset",
+            "connection aborted",
+            "remote end closed",
+            "connection error",
+        )
+    ):
+        return "Internet connection dropped while embedding. Use retry."
+    if "503" in lowered or "unavailable" in lowered:
+        return "Gemini is temporarily unavailable. Use retry."
+    return re.sub(r"\s+", " ", error).strip()[:180]
+
+
 def initialize_store():
     global _collection
 
@@ -47,7 +78,9 @@ def initialize_store():
                 created_at TEXT NOT NULL,
                 error_message TEXT,
                 storage_ext TEXT NOT NULL DEFAULT '',
-                error TEXT
+                error TEXT,
+                chunks_done INTEGER NOT NULL DEFAULT 0,
+                chunks_total INTEGER NOT NULL DEFAULT 0
             )
             """
         )
@@ -61,6 +94,14 @@ def initialize_store():
             )
         if "error" not in columns:
             connection.execute("ALTER TABLE sources ADD COLUMN error TEXT")
+        if "chunks_done" not in columns:
+            connection.execute(
+                "ALTER TABLE sources ADD COLUMN chunks_done INTEGER NOT NULL DEFAULT 0"
+            )
+        if "chunks_total" not in columns:
+            connection.execute(
+                "ALTER TABLE sources ADD COLUMN chunks_total INTEGER NOT NULL DEFAULT 0"
+            )
         connection.execute(
             "UPDATE sources SET error = error_message "
             "WHERE error IS NULL AND error_message IS NOT NULL"
@@ -161,7 +202,8 @@ def list_sources():
         connection.row_factory = sqlite3.Row
         rows = connection.execute(
             """
-            SELECT file_id, name, source_type, status, topics, video_url, error
+            SELECT file_id, name, source_type, status, topics, video_url, error,
+                   chunks_done, chunks_total
             FROM sources
             ORDER BY created_at DESC
             """
@@ -176,9 +218,11 @@ def list_sources():
             "status": row["status"],
             "topics": json.loads(row["topics"]),
             "video_url": row["video_url"],
+            "chunks_done": row["chunks_done"],
+            "chunks_total": row["chunks_total"],
         }
         if row["error"]:
-            source["error"] = row["error"]
+            source["error"] = _plain_library_error(row["error"])
         sources.append(source)
     return sources
 
@@ -191,12 +235,44 @@ def set_source_topics(file_id: str, topic_names: list[str]):
         )
 
 
+def set_source_chunk_total(file_id: str, total: int):
+    saved = len(_get_collection().get(where={"file_id": file_id})["ids"])
+    with sqlite3.connect(DATABASE_PATH) as connection:
+        connection.execute(
+            "UPDATE sources SET chunks_done = MIN(?, ?), chunks_total = ? "
+            "WHERE file_id = ?",
+            (saved, total, total, file_id),
+        )
+
+
+def record_source_chunk_progress(file_id: str):
+    saved = len(_get_collection().get(where={"file_id": file_id})["ids"])
+    with sqlite3.connect(DATABASE_PATH) as connection:
+        connection.execute(
+            "UPDATE sources SET chunks_done = MIN(?, chunks_total) WHERE file_id = ?",
+            (saved, file_id),
+        )
+
+
 def set_source_status(file_id: str, status: str, error_message: str | None = None):
     with sqlite3.connect(DATABASE_PATH) as connection:
         connection.execute(
             "UPDATE sources SET status = ?, error_message = ?, error = ? WHERE file_id = ?",
             (status, error_message, error_message, file_id),
         )
+
+
+def start_source_retry(file_id: str) -> bool:
+    with sqlite3.connect(DATABASE_PATH) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE sources
+            SET status = 'processing', error_message = NULL, error = NULL
+            WHERE file_id = ? AND status = 'failed'
+            """,
+            (file_id,),
+        )
+    return cursor.rowcount == 1
 
 
 def fail_interrupted_sources():

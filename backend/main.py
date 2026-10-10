@@ -30,6 +30,7 @@ from store import (
     fail_interrupted_sources,
     list_sources,
     search_chunks,
+    start_source_retry,
     TextBudgetExceeded,
 )
 
@@ -231,6 +232,30 @@ async def upload(
 @app.get("/library")
 def library():
     return list_sources()
+
+
+@app.post("/sources/{file_id}/retry")
+def retry_source(file_id: str, background_tasks: BackgroundTasks):
+    try:
+        normalized_id = str(uuid.UUID(file_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Source not found.") from exc
+
+    source = get_source(normalized_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Source not found.")
+    if source["status"] != "failed":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Source cannot be retried while status is '{source['status']}'.",
+        )
+    if not start_source_retry(normalized_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Source status changed before retry could start. Refresh the library.",
+        )
+    background_tasks.add_task(process_source, normalized_id)
+    return {"file_id": normalized_id, "status": "processing"}
 
 
 @app.get("/topics")

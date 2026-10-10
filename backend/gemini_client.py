@@ -2,7 +2,9 @@ import json
 import logging
 import os
 import re
+import threading
 import time
+from collections.abc import Callable
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -15,7 +17,7 @@ from config import (
     EMBEDDING_MODEL,
     EMBEDDING_PAUSE_SECONDS,
     FILES_API_MODEL,
-    GEMINI_503_RETRY_PAUSE_SECONDS,
+    GEMINI_RETRY_DELAYS_SECONDS,
     GEMINI_503_RETRIES,
     TEXT_DAILY_BUDGET,
     TEXT_MODEL,
@@ -35,6 +37,10 @@ from store import TextBudgetExceeded, reserve_text_call, text_calls_today
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 BATCH_SIZE = EMBEDDING_BATCH_SIZE
 logger = logging.getLogger(__name__)
+_embedding_lock = threading.Lock()
+_next_embedding_call = 0.0
+_text_call_lock = threading.Lock()
+_text_calls_this_process = 0
 
 
 class GeminiError(Exception):
@@ -52,7 +58,7 @@ class GeminiEmbeddingError(GeminiError):
     pass
 
 
-def _make_client():
+def _make_client(timeout_ms: int = 60_000):
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise GeminiError(
@@ -63,6 +69,7 @@ def _make_client():
     return genai.Client(
         api_key=api_key,
         http_options=types.HttpOptions(
+            timeout=timeout_ms,
             retry_options=types.HttpRetryOptions(attempts=1),
         ),
     )
@@ -82,33 +89,114 @@ def _error_code(exc: Exception):
     return int(match.group(1)) if match else None
 
 
-def _request(call, stage: str, text_call: bool = False):
+def _is_retryable(exc: Exception, code: int | None) -> bool:
+    if code == 429:
+        return False
+    exception_type = type(exc).__name__.lower()
+    if (
+        code == 503
+        or isinstance(exc, (TimeoutError, ConnectionError))
+        or any(
+            marker in exception_type
+            for marker in ("timeout", "connection", "connecterror", "remoteprotocol")
+        )
+    ):
+        return True
+    message = str(exc).lower()
+    return any(
+        marker in message
+        for marker in (
+            "server disconnected",
+            "connection reset",
+            "connection aborted",
+            "remote end closed",
+            "connection refused",
+            "network is unreachable",
+            "connection error",
+            "timed out",
+            "timeout",
+        )
+    )
+
+
+def _wait_for_embedding_slot():
+    global _next_embedding_call
+    with _embedding_lock:
+        now = time.monotonic()
+        delay = max(0.0, _next_embedding_call - now)
+        _next_embedding_call = max(now, _next_embedding_call) + EMBEDDING_PAUSE_SECONDS
+    if delay:
+        time.sleep(delay)
+
+
+def _request(
+    operation: Callable[[genai.Client], object],
+    stage: str,
+    text_call: bool = False,
+):
+    global _text_calls_this_process
+    text_generation = text_call and stage != "vision"
     for attempt in range(GEMINI_503_RETRIES + 1):
         if text_call:
             reserve_text_call()
+            with _text_call_lock:
+                _text_calls_this_process += 1
+                call_number = _text_calls_this_process
+            logger.info(
+                "TEXT CALL #%s today (limit %s)",
+                call_number,
+                TEXT_DAILY_BUDGET,
+            )
+        if stage.startswith("embedding"):
+            _wait_for_embedding_slot()
+        client = None
         try:
-            return call()
+            client = _make_client(
+                timeout_ms=120_000 if text_generation else 60_000
+            )
+            return operation(client)
         except Exception as exc:
             code = _error_code(exc)
             api_key = os.getenv("GEMINI_API_KEY", "")
             detail = str(exc).replace(api_key, "[redacted]") if api_key else str(exc)
+            if code == 429:
+                logger.error("Gemini %s failed with HTTP 429: %s", stage, detail)
+                raise GeminiQuotaError(
+                    "Gemini quota limit reached, wait and try again later",
+                    stage,
+                    429,
+                ) from exc
+            if text_generation and code == 504:
+                logger.error("Gemini %s failed with HTTP 504: %s", stage, detail)
+                raise GeminiError(
+                    f"Gemini text call exceeded its deadline: {detail}",
+                    stage,
+                    504,
+                ) from exc
             message = f"Gemini {stage} failed"
             if code is not None:
                 message += f" with HTTP {code}"
             message += f": {detail}"
-            if code == 429:
-                raise GeminiQuotaError(message, stage, code) from exc
-            if code == 503 and attempt < GEMINI_503_RETRIES:
+            if _is_retryable(exc, code) and attempt < GEMINI_503_RETRIES:
+                delay = GEMINI_RETRY_DELAYS_SECONDS[attempt]
                 logger.warning(
                     "%s; retrying in %s seconds (%s/%s)",
                     message,
-                    GEMINI_503_RETRY_PAUSE_SECONDS,
+                    delay,
                     attempt + 1,
                     GEMINI_503_RETRIES,
                 )
-                time.sleep(GEMINI_503_RETRY_PAUSE_SECONDS)
+                time.sleep(delay)
                 continue
+            if _is_retryable(exc, code):
+                message = f"Internet connection failed during {stage}: {detail}"
             raise GeminiError(message, stage, code) from exc
+        finally:
+            if client is not None:
+                try:
+                    client.close()
+                except Exception as exc:
+                    logger.warning("Could not close Gemini client: %s", exc)
 
 
 def embed_batches(
@@ -121,19 +209,16 @@ def embed_batches(
     if not texts:
         return
 
-    client = _make_client()
     for start in range(0, len(texts), BATCH_SIZE):
         batch = texts[start : start + BATCH_SIZE]
         for batch_index, text in enumerate(batch):
-            if start + batch_index:
-                time.sleep(EMBEDDING_PAUSE_SECONDS)
             prompt = (
                 QUERY_EMBEDDING_PROMPT.format(query=text)
                 if task == "query"
                 else DOCUMENT_EMBEDDING_PROMPT.format(title=title, text=text)
             )
             response = _request(
-                lambda: client.models.embed_content(
+                lambda client: client.models.embed_content(
                     model=EMBEDDING_MODEL,
                     contents=prompt,
                 ),
@@ -160,12 +245,11 @@ def generate_json(
     model: str = TEXT_MODEL,
     stage: str = "text",
 ) -> str:
-    client = _make_client()
     contents = [prompt]
     if image is not None:
         contents.append(types.Part.from_bytes(data=image[0], mime_type=image[1]))
     response = _request(
-        lambda: client.models.generate_content(
+        lambda client: client.models.generate_content(
             model=model,
             contents=contents,
             config=types.GenerateContentConfig(response_mime_type="application/json"),
@@ -192,27 +276,8 @@ def _tiny_white_png() -> bytes:
 def check_gemini_health() -> dict:
     results = {}
     try:
-        client = _make_client()
-    except GeminiError as exc:
-        for name, model in (
-            ("embedding", EMBEDDING_MODEL),
-            ("text", TEXT_MODEL),
-            ("vision", VISION_MODEL),
-            ("files_api", FILES_API_MODEL),
-        ):
-            results[name] = {
-                "model": model,
-                "status": "error",
-                "error_code": exc.error_code,
-                "error": str(exc),
-            }
-        results["text_calls_today"] = text_calls_today()
-        results["text_daily_budget"] = TEXT_DAILY_BUDGET
-        return results
-
-    try:
         response = _request(
-            lambda: client.models.embed_content(
+            lambda client: client.models.embed_content(
                 model=EMBEDDING_MODEL,
                 contents=EMBEDDING_HEALTH_CHECK_CONTENT,
             ),
@@ -273,7 +338,7 @@ def check_gemini_health() -> dict:
 
     try:
         _request(
-            lambda: next(
+            lambda client: next(
                 iter(client.files.list(config=types.ListFilesConfig(page_size=1))),
                 None,
             ),
@@ -298,9 +363,8 @@ def check_gemini_health() -> dict:
 
 
 def transcribe_video_file(video_path: Path) -> str:
-    client = _make_client()
     uploaded = _request(
-        lambda: client.files.upload(file=str(video_path)),
+        lambda client: client.files.upload(file=str(video_path)),
         "video file upload",
     )
     waited = 0
@@ -310,14 +374,14 @@ def transcribe_video_file(video_path: Path) -> str:
         time.sleep(VIDEO_FILE_POLL_SECONDS)
         waited += VIDEO_FILE_POLL_SECONDS
         uploaded = _request(
-            lambda: client.files.get(name=uploaded.name),
+            lambda client: client.files.get(name=uploaded.name),
             "video file processing",
         )
     if uploaded.state.name == "FAILED":
         raise GeminiError("Gemini could not process the uploaded video.", "Files API", None)
 
     response = _request(
-        lambda: client.models.generate_content(
+        lambda client: client.models.generate_content(
             model=FILES_API_MODEL,
             contents=[uploaded, VIDEO_TRANSCRIPT_PROMPT],
             config=types.GenerateContentConfig(response_mime_type="application/json"),
@@ -329,7 +393,7 @@ def transcribe_video_file(video_path: Path) -> str:
         raise GeminiError("Gemini returned an empty video transcript.", "video transcription", None)
     try:
         _request(
-            lambda: client.files.delete(name=uploaded.name),
+            lambda client: client.files.delete(name=uploaded.name),
             "video file cleanup",
         )
     except GeminiError as exc:
