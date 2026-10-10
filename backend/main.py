@@ -42,14 +42,6 @@ VIDEO_EXTENSIONS = {".mp4", ".mkv", ".webm", ".mov"}
 
 app = FastAPI()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 
 class AskRequest(BaseModel):
     question: str = Field(min_length=1)
@@ -401,3 +393,12 @@ def ask(body: AskRequest):
         logger.error("Gemini could not answer the question: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return answer
+
+
+app = CORSMiddleware(
+    app=app,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_credentials=False,
+)
