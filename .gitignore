@@ -8,3 +8,4 @@ dist/
 sample_material/
 *.mp4
 *.mkv
+backend/data/
