@@ -14,6 +14,7 @@ import { getLibrary, getMastery, getQuiz } from "@/api";
 import ChatScreen from "@/components/ChatScreen.jsx";
 import QuizScreen from "@/components/QuizScreen.jsx";
 import DashboardScreen from "@/components/DashboardScreen.jsx";
+import LibraryScreen from "@/components/LibraryScreen.jsx";
 
 const navigation = [
   { id: "home", label: "Home", icon: House },
@@ -249,6 +250,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [startingDiagnostic, setStartingDiagnostic] = useState(false);
   const [quizSourceIds, setQuizSourceIds] = useState([]);
+  const [chatSourceIds, setChatSourceIds] = useState([]);
   const [quizTopics, setQuizTopics] = useState([]);
   const [starterQuiz, setStarterQuiz] = useState(null);
 
@@ -304,6 +306,11 @@ export default function App() {
     setQuizTopics([]);
     setQuizSourceIds(sourceIds);
     navigate("quiz");
+  }
+
+  function openChatWithSource(sourceId) {
+    setChatSourceIds([sourceId]);
+    navigate("chat");
   }
 
   function openQuizWithTopic(topic) {
@@ -449,8 +456,16 @@ export default function App() {
           ) : screen === "chat" ? (
             <ChatScreen
               sources={library}
+              initialSourceIds={chatSourceIds}
               onBrowseLibrary={() => navigate("library")}
               onQuizSources={openQuizWithSources}
+            />
+          ) : screen === "library" ? (
+            <LibraryScreen
+              sources={library}
+              loading={loading}
+              onSourcesChange={setLibrary}
+              onAskAboutSource={openChatWithSource}
             />
           ) : screen === "quiz" ? (
             <QuizScreen

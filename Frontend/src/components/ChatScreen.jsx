@@ -89,10 +89,11 @@ function NotCoveredCard({
 
 export default function ChatScreen({
   sources,
+  initialSourceIds = [],
   onBrowseLibrary,
   onQuizSources,
 }) {
-  const [selectedSourceIds, setSelectedSourceIds] = useState([]);
+  const [selectedSourceIds, setSelectedSourceIds] = useState(initialSourceIds);
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState([]);
   const [waiting, setWaiting] = useState(false);
