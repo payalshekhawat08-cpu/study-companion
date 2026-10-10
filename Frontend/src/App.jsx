@@ -11,6 +11,7 @@ import {
 import { Toaster, toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { getLibrary, getMastery, getQuiz } from "@/api";
+import ChatScreen from "@/components/ChatScreen.jsx";
 
 const navigation = [
   { id: "home", label: "Home", icon: House },
@@ -173,7 +174,13 @@ function Welcome({
   );
 }
 
-function PlaceholderScreen({ screen, name, goal, onNavigate }) {
+function PlaceholderScreen({
+  screen,
+  name,
+  goal,
+  quizSourceIds,
+  onNavigate,
+}) {
   const goalLabels = {
     exam: "prepare for an exam",
     topic: "learn a topic",
@@ -200,7 +207,9 @@ function PlaceholderScreen({ screen, name, goal, onNavigate }) {
     quiz: {
       title: "Quiz",
       description: "Practice with questions based on your material.",
-      next: "Quiz setup and answering arrive in Phase 4.",
+      next: quizSourceIds.length
+        ? `Quiz setup will use ${quizSourceIds.length} selected source${quizSourceIds.length === 1 ? "" : "s"}. Quiz setup and answering arrive in Phase 4.`
+        : "Quiz setup and answering arrive in Phase 4.",
     },
     progress: {
       title: "Your progress",
@@ -239,6 +248,7 @@ export default function App() {
   const [mastery, setMastery] = useState(null);
   const [loading, setLoading] = useState(true);
   const [startingDiagnostic, setStartingDiagnostic] = useState(false);
+  const [quizSourceIds, setQuizSourceIds] = useState([]);
 
   useEffect(() => {
     let active = true;
@@ -278,6 +288,11 @@ export default function App() {
 
   function navigate(nextScreen) {
     setScreen(nextScreen);
+  }
+
+  function openQuizWithSources(sourceIds) {
+    setQuizSourceIds(sourceIds);
+    navigate("quiz");
   }
 
   function saveWelcome(firstName, selectedGoal) {
@@ -384,12 +399,21 @@ export default function App() {
           {name && <span className="profile-name">{name}</span>}
         </header>
         <main className="page-content">
-          <PlaceholderScreen
-            screen={screen}
-            name={name}
-            goal={goal}
-            onNavigate={navigate}
-          />
+          {screen === "chat" ? (
+            <ChatScreen
+              sources={library}
+              onBrowseLibrary={() => navigate("library")}
+              onQuizSources={openQuizWithSources}
+            />
+          ) : (
+            <PlaceholderScreen
+              screen={screen}
+              name={name}
+              goal={goal}
+              quizSourceIds={quizSourceIds}
+              onNavigate={navigate}
+            />
+          )}
         </main>
       </div>
 
