@@ -1,11 +1,14 @@
 import json
 import sqlite3
+import time
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Lock
+from zoneinfo import ZoneInfo
 
 import chromadb
 
-from config import TOP_K
+from config import TEXT_CALL_INTERVAL_SECONDS, TEXT_DAILY_BUDGET, TOP_K
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
@@ -14,6 +17,15 @@ CHROMA_PATH = BASE_DIR / "chroma_db"
 COLLECTION_NAME = "study_companion"
 
 _collection = None
+_text_reservation_lock = Lock()
+
+
+class TextBudgetExceeded(Exception):
+    pass
+
+
+def _pacific_date() -> str:
+    return datetime.now(ZoneInfo("America/Los_Angeles")).date().isoformat()
 
 
 def initialize_store():
@@ -34,7 +46,8 @@ def initialize_store():
                 video_url TEXT,
                 created_at TEXT NOT NULL,
                 error_message TEXT,
-                storage_ext TEXT NOT NULL DEFAULT ''
+                storage_ext TEXT NOT NULL DEFAULT '',
+                error TEXT
             )
             """
         )
@@ -46,6 +59,12 @@ def initialize_store():
             connection.execute(
                 "ALTER TABLE sources ADD COLUMN storage_ext TEXT NOT NULL DEFAULT ''"
             )
+        if "error" not in columns:
+            connection.execute("ALTER TABLE sources ADD COLUMN error TEXT")
+        connection.execute(
+            "UPDATE sources SET error = error_message "
+            "WHERE error IS NULL AND error_message IS NOT NULL"
+        )
         connection.execute(
             """
             UPDATE sources
@@ -68,6 +87,14 @@ def initialize_store():
         connection.execute(
             "CREATE TABLE IF NOT EXISTS topics "
             "(name TEXT PRIMARY KEY COLLATE NOCASE)"
+        )
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS gemini_daily_usage "
+            "(usage_date TEXT PRIMARY KEY, text_calls INTEGER NOT NULL)"
+        )
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS gemini_rate_limit "
+            "(id INTEGER PRIMARY KEY CHECK (id = 1), next_allowed_at REAL NOT NULL)"
         )
         connection.execute(
             """
@@ -134,14 +161,15 @@ def list_sources():
         connection.row_factory = sqlite3.Row
         rows = connection.execute(
             """
-            SELECT file_id, name, source_type, status, topics, video_url
+            SELECT file_id, name, source_type, status, topics, video_url, error
             FROM sources
             ORDER BY created_at DESC
             """
         ).fetchall()
 
-    return [
-        {
+    sources = []
+    for row in rows:
+        source = {
             "file_id": row["file_id"],
             "name": row["name"],
             "source_type": row["source_type"],
@@ -149,8 +177,10 @@ def list_sources():
             "topics": json.loads(row["topics"]),
             "video_url": row["video_url"],
         }
-        for row in rows
-    ]
+        if row["error"]:
+            source["error"] = row["error"]
+        sources.append(source)
+    return sources
 
 
 def set_source_topics(file_id: str, topic_names: list[str]):
@@ -164,9 +194,62 @@ def set_source_topics(file_id: str, topic_names: list[str]):
 def set_source_status(file_id: str, status: str, error_message: str | None = None):
     with sqlite3.connect(DATABASE_PATH) as connection:
         connection.execute(
-            "UPDATE sources SET status = ?, error_message = ? WHERE file_id = ?",
-            (status, error_message, file_id),
+            "UPDATE sources SET status = ?, error_message = ?, error = ? WHERE file_id = ?",
+            (status, error_message, error_message, file_id),
         )
+
+
+def fail_interrupted_sources():
+    with sqlite3.connect(DATABASE_PATH) as connection:
+        connection.execute(
+            "UPDATE sources SET status = 'failed', error_message = ?, error = ? "
+            "WHERE status = 'processing'",
+            ("Interrupted by a server restart", "Interrupted by a server restart"),
+        )
+
+
+def text_calls_today() -> int:
+    with sqlite3.connect(DATABASE_PATH) as connection:
+        row = connection.execute(
+            "SELECT text_calls FROM gemini_daily_usage WHERE usage_date = ?",
+            (_pacific_date(),),
+        ).fetchone()
+    return row[0] if row else 0
+
+
+def reserve_text_call():
+    with _text_reservation_lock, sqlite3.connect(DATABASE_PATH) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        today = _pacific_date()
+        row = connection.execute(
+            "SELECT text_calls FROM gemini_daily_usage WHERE usage_date = ?",
+            (today,),
+        ).fetchone()
+        calls = row[0] if row else 0
+        if calls >= TEXT_DAILY_BUDGET:
+            raise TextBudgetExceeded(
+                f"Gemini text daily limit reached ({TEXT_DAILY_BUDGET} calls). "
+                "Try again after midnight Pacific time."
+            )
+
+        now = time.time()
+        row = connection.execute(
+            "SELECT next_allowed_at FROM gemini_rate_limit WHERE id = 1"
+        ).fetchone()
+        call_at = max(now, row[0] if row else now)
+        connection.execute(
+            "INSERT OR REPLACE INTO gemini_rate_limit (id, next_allowed_at) "
+            "VALUES (1, ?)",
+            (call_at + TEXT_CALL_INTERVAL_SECONDS,),
+        )
+        connection.execute(
+            "INSERT OR REPLACE INTO gemini_daily_usage (usage_date, text_calls) "
+            "VALUES (?, ?)",
+            (today, calls + 1),
+        )
+    delay = call_at - time.time()
+    if delay > 0:
+        time.sleep(delay)
 
 
 def get_transcript(file_id: str) -> str | None:

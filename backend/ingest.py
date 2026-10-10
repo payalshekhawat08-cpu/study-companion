@@ -12,10 +12,13 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import NoTranscriptFound, TranscriptsDisabled
 
 from config import (
+    ENABLE_IMAGE_DESCRIPTIONS,
     MAX_PDF_FIGURES,
     PDF_CHUNK_OVERLAP,
     PDF_CHUNK_SIZE,
     SLIDE_CHUNK_SIZE,
+    TOPIC_TAGGING_SINGLE_CALL_MAX_CHUNKS,
+    TOPIC_TAGGING_SNIPPET_SIZE,
     VIDEO_FILE_MAX_SIZE,
     VIDEO_OVERLAP_SECONDS,
     VIDEO_WINDOW_SECONDS,
@@ -24,6 +27,7 @@ from gemini_client import (
     GeminiQuotaError,
     embed_batches,
     generate_json,
+    generate_vision_json,
     transcribe_video_file,
 )
 from prompts import PDF_FIGURE_PROMPT, SLIDE_IMAGE_PROMPT, TOPIC_TAGGING_PROMPT
@@ -202,6 +206,8 @@ def _image_mime(extension: str) -> str:
 
 
 def _process_pictures(pictures, prompt: str, source_name: str):
+    if not ENABLE_IMAGE_DESCRIPTIONS:
+        return
     captions = {}
     for picture, image_bytes, mime_type in pictures:
         if existing_chunk_ids([picture["chunk_id"]]):
@@ -211,7 +217,7 @@ def _process_pictures(pictures, prompt: str, source_name: str):
         if description is not None:
             captions[image_hash] = description
         elif image_hash not in captions:
-            captions[image_hash] = generate_json(
+            captions[image_hash] = generate_vision_json(
                 prompt,
                 image=(image_bytes, mime_type),
             )
@@ -251,13 +257,22 @@ def _tag_source(file_id: str, source_name: str):
         chunk for chunk in get_file_chunks(file_id)
         if not chunk["metadata"].get("topic")
     ]
+    if not chunks:
+        set_source_topics(file_id, [])
+        return
     known_topics = get_topic_names()
-    for start in range(0, len(chunks), 30):
-        batch = chunks[start : start + 30]
+    if len(chunks) > TOPIC_TAGGING_SINGLE_CALL_MAX_CHUNKS:
+        midpoint = (len(chunks) + 1) // 2
+        batches = [chunks[:midpoint], chunks[midpoint:]]
+    else:
+        batches = [chunks]
+    for batch in batches:
         supplied = [
             {
                 "id": chunk["chunk_id"],
-                "text": " ".join(chunk["text"].split())[:250],
+                "text": " ".join(chunk["text"].split())[
+                    :TOPIC_TAGGING_SNIPPET_SIZE
+                ],
             }
             for chunk in batch
         ]

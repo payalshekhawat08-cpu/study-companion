@@ -12,8 +12,14 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from pptx import Presentation
 
-from config import SIMILARITY_THRESHOLD, TOP_K
-from gemini_client import GeminiError, GeminiQuotaError, embed_query, generate_json
+from config import SIMILARITY_THRESHOLD, TEXT_DAILY_BUDGET, TOP_K
+from gemini_client import (
+    GeminiError,
+    GeminiQuotaError,
+    check_gemini_health,
+    embed_query,
+    generate_json,
+)
 from ingest import MAX_FILE_SIZE, MAX_VIDEO_FILE_SIZE, process_source
 from prompts import GROUNDED_ANSWER_PROMPT
 from store import (
@@ -21,8 +27,10 @@ from store import (
     get_source,
     get_topics,
     initialize_store,
+    fail_interrupted_sources,
     list_sources,
     search_chunks,
+    TextBudgetExceeded,
 )
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -51,11 +59,19 @@ class AskRequest(BaseModel):
 def startup():
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
     initialize_store()
+    fail_interrupted_sources()
 
 
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+
+@app.get("/health/gemini")
+def gemini_health():
+    result = check_gemini_health()
+    result["text_daily_budget"] = TEXT_DAILY_BUDGET
+    return result
 
 
 @app.get("/")
@@ -283,6 +299,20 @@ def _not_grounded():
     return {"answer": UNSUPPORTED_ANSWER, "grounded": False, "citations": []}
 
 
+def _passage_fallback(results: list[dict]):
+    if not results:
+        return _not_grounded()
+    best = results[0]
+    return {
+        "answer": (
+            "Here is the most relevant passage from your material:\n\n"
+            + best["text"]
+        ),
+        "grounded": True,
+        "citations": [_citation(best)],
+    }
+
+
 def _answer_with_embedding(question: str, source_ids: list[str], embedding: list[float]):
     results = search_chunks(embedding, limit=TOP_K, file_ids=source_ids)
     if not results or results[0]["similarity"] < SIMILARITY_THRESHOLD:
@@ -292,9 +322,13 @@ def _answer_with_embedding(question: str, source_ids: list[str], embedding: list
         f"[{index}] id={result['chunk_id']}: {result['text']}"
         for index, result in enumerate(results, start=1)
     )
-    response_text = generate_json(
-        GROUNDED_ANSWER_PROMPT.format(question=question, context=context)
-    )
+    try:
+        response_text = generate_json(
+            GROUNDED_ANSWER_PROMPT.format(question=question, context=context)
+        )
+    except (TextBudgetExceeded, GeminiQuotaError) as exc:
+        logger.warning("Using retrieved passage because Gemini text is unavailable: %s", exc)
+        return _passage_fallback(results), results
     try:
         response = json.loads(response_text)
     except json.JSONDecodeError:
