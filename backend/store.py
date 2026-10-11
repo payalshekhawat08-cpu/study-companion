@@ -1,15 +1,24 @@
 import json
+import hashlib
 import re
 import sqlite3
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 from zoneinfo import ZoneInfo
 
 import chromadb
 
-from config import TEXT_CALL_INTERVAL_SECONDS, TEXT_DAILY_BUDGET, TOP_K
+from config import (
+    P_INIT,
+    P_LEARN,
+    P_GUESS,
+    P_SLIP,
+    TEXT_CALL_INTERVAL_SECONDS,
+    TEXT_DAILY_BUDGET,
+    TOP_K,
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
@@ -161,10 +170,24 @@ def initialize_store():
                 misconception_note TEXT,
                 source_citation TEXT NOT NULL,
                 source_file_id TEXT NOT NULL,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                is_diagnostic INTEGER NOT NULL DEFAULT 0,
+                diagnostic_source_signature TEXT
             )
             """
         )
+        question_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(questions)")
+        }
+        if "is_diagnostic" not in question_columns:
+            connection.execute(
+                "ALTER TABLE questions ADD COLUMN is_diagnostic "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+        if "diagnostic_source_signature" not in question_columns:
+            connection.execute(
+                "ALTER TABLE questions ADD COLUMN diagnostic_source_signature TEXT"
+            )
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS student_questions (
@@ -173,6 +196,28 @@ def initialize_store():
                 status TEXT NOT NULL CHECK (status IN ('served', 'answered')),
                 answered_at TEXT,
                 PRIMARY KEY (student_id, question_id)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS mastery (
+                student_id TEXT NOT NULL,
+                topic TEXT NOT NULL,
+                p_known REAL NOT NULL,
+                answers_count INTEGER NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (student_id, topic)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS mastery_history (
+                student_id TEXT NOT NULL,
+                date TEXT NOT NULL,
+                overall_mastery REAL NOT NULL,
+                PRIMARY KEY (student_id, date)
             )
             """
         )
@@ -606,19 +651,47 @@ def get_quiz_chunks(topics: list[str], source_ids: list[str]) -> list[dict]:
     return sorted(chunks, key=lambda chunk: (chunk["metadata"].get("topic", ""), chunk["chunk_id"]))
 
 
+def get_ready_source_signature() -> str:
+    with sqlite3.connect(DATABASE_PATH) as connection:
+        rows = connection.execute(
+            "SELECT file_id FROM sources WHERE status = 'ready' ORDER BY file_id"
+        ).fetchall()
+    return hashlib.sha256(
+        "\n".join(row[0] for row in rows).encode("utf-8")
+    ).hexdigest()
+
+
+def get_diagnostic_question_count(source_signature: str) -> int:
+    with sqlite3.connect(DATABASE_PATH) as connection:
+        row = connection.execute(
+            """
+            SELECT COUNT(*) FROM questions
+            WHERE is_diagnostic = 1 AND diagnostic_source_signature = ?
+            """,
+            (source_signature,),
+        ).fetchone()
+    return row[0]
+
+
 def get_unseen_questions(
     student_id: str,
     topics: list[str],
     source_ids: list[str],
     types: list[str],
     difficulty: str,
+    diagnostic: bool = False,
+    diagnostic_source_signature: str | None = None,
 ) -> list[dict]:
     clauses = [
         "sq.question_id IS NULL",
         "s.status = 'ready'",
+        "q.is_diagnostic = ?",
         "q.type IN ({})".format(",".join("?" for _ in types)),
     ]
-    values: list[str] = [student_id, *types]
+    values: list[str | int] = [student_id, int(diagnostic), *types]
+    if diagnostic and diagnostic_source_signature:
+        clauses.append("q.diagnostic_source_signature = ?")
+        values.append(diagnostic_source_signature)
     if topics:
         clauses.append("q.topic IN ({})".format(",".join("?" for _ in topics)))
         values.extend(topics)
@@ -674,8 +747,9 @@ def save_quiz_questions(questions: list[dict]):
             INSERT INTO questions (
                 id, topic, type, difficulty, question, options, correct_answer,
                 key_terms, explanation, misconception_note, source_citation,
-                source_file_id, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                source_file_id, created_at, is_diagnostic,
+                diagnostic_source_signature
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -692,6 +766,8 @@ def save_quiz_questions(questions: list[dict]):
                     json.dumps(question["source_citation"]),
                     question["source_file_id"],
                     question["created_at"],
+                    int(question.get("is_diagnostic", False)),
+                    question.get("diagnostic_source_signature"),
                 )
                 for question in questions
             ],
@@ -756,3 +832,74 @@ def mark_question_answered(student_id: str, question_id: str) -> bool:
             (datetime.now(timezone.utc).isoformat(), student_id, question_id),
         )
     return cursor.rowcount == 1
+
+
+def update_student_mastery(student_id: str, topic: str, correct: bool):
+    with sqlite3.connect(DATABASE_PATH) as connection:
+        row = connection.execute(
+            "SELECT p_known, answers_count FROM mastery "
+            "WHERE student_id = ? AND topic = ?",
+            (student_id, topic),
+        ).fetchone()
+        p_known, answers_count = row if row else (P_INIT, 0)
+
+        if correct:
+            denominator = p_known * (1 - P_SLIP) + (1 - p_known) * P_GUESS
+            posterior = p_known * (1 - P_SLIP) / denominator
+        else:
+            denominator = p_known * P_SLIP + (1 - p_known) * (1 - P_GUESS)
+            posterior = p_known * P_SLIP / denominator
+        new_mastery = min(0.99, max(0.01, posterior + (1 - posterior) * P_LEARN))
+        updated_at = datetime.now(timezone.utc).isoformat()
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO mastery
+                (student_id, topic, p_known, answers_count, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (student_id, topic, new_mastery, answers_count + 1, updated_at),
+        )
+        overall = connection.execute(
+            "SELECT AVG(p_known) FROM mastery WHERE student_id = ?",
+            (student_id,),
+        ).fetchone()[0]
+        today = datetime.now(timezone.utc).date().isoformat()
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO mastery_history
+                (student_id, date, overall_mastery)
+            VALUES (?, ?, ?)
+            """,
+            (student_id, today, overall),
+        )
+
+
+def get_student_mastery(student_id: str) -> dict:
+    with sqlite3.connect(DATABASE_PATH) as connection:
+        mastery_rows = connection.execute(
+            "SELECT topic, p_known, answers_count FROM mastery "
+            "WHERE student_id = ? ORDER BY topic",
+            (student_id,),
+        ).fetchall()
+        history_rows = connection.execute(
+            "SELECT date, overall_mastery FROM mastery_history "
+            "WHERE student_id = ? ORDER BY date",
+            (student_id,),
+        ).fetchall()
+    dates = {row[0] for row in history_rows}
+    today = datetime.now(timezone.utc).date()
+    streak = 0
+    while (today - timedelta(days=streak)).isoformat() in dates:
+        streak += 1
+    mastery = {
+        topic: {"p_known": p_known, "answers_count": answers_count}
+        for topic, p_known, answers_count in mastery_rows
+    }
+    return {
+        "mastery": mastery,
+        "history": [
+            {"date": date, "mastery": overall_mastery}
+            for date, overall_mastery in history_rows
+        ],
+        "streak_days": streak,
+    }

@@ -41,7 +41,9 @@ QUIZ_WRITE_PROMPT = (
     "correct option text. For short answers, provide "
     "a correct_answer and key_terms. For numerical questions, provide a numeric "
     "correct_answer with a unit when needed. Keep explanations short and cite "
-    "the chunk. Return JSON only shaped like "
+    "the chunk. For mixed difficulty, include a mix of easy, medium, and hard "
+    "questions. Prefer concept questions; do not ask trivia about array sizes "
+    "or variable names in code. Return JSON only shaped like "
     '{{"questions":[{{"type":"mcq|short|numerical","question":"...","options":["..."],'
     '"correct_index":0,"correct_answer":"...","key_terms":["..."],"explanation":"...",'
     '"misconception_note":null,"topic":"...","difficulty":"easy|medium|hard",'

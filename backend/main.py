@@ -22,7 +22,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from pptx import Presentation
 
-from config import SIMILARITY_THRESHOLD, TEXT_DAILY_BUDGET, TOP_K
+from config import P_INIT, SIMILARITY_THRESHOLD, TEXT_DAILY_BUDGET, TOP_K
 from gemini_client import (
     GeminiError,
     GeminiQuotaError,
@@ -35,11 +35,14 @@ from prompts import GROUNDED_ANSWER_PROMPT, QUIZ_VERIFY_PROMPT, QUIZ_WRITE_PROMP
 from store import (
     create_source,
     get_question,
+    get_diagnostic_question_count,
     get_quiz_chunks,
+    get_ready_source_signature,
     get_recent_question_texts,
     get_source,
     get_student_question_status,
     get_topics,
+    get_student_mastery,
     get_unseen_questions,
     initialize_store,
     mark_question_answered,
@@ -50,6 +53,7 @@ from store import (
     serve_questions,
     start_source_retry,
     TextBudgetExceeded,
+    update_student_mastery,
 )
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -287,6 +291,42 @@ def topics():
     return get_topics()
 
 
+@app.get("/mastery")
+def mastery(
+    student_id: str = Header(default="anonymous", alias="X-Student-Id"),
+):
+    student_id = student_id.strip() or "anonymous"
+    data = get_student_mastery(student_id)
+    answered_topics = data["mastery"]
+    topic_values = {
+        topic: values["p_known"]
+        for topic, values in answered_topics.items()
+    }
+    for source in list_sources():
+        if source["status"] == "ready":
+            for topic in source["topics"]:
+                topic_values.setdefault(topic, P_INIT)
+
+    weak = sorted(
+        (
+            (topic, values["p_known"])
+            for topic, values in answered_topics.items()
+            if values["answers_count"] > 0 and values["p_known"] < 0.5
+        ),
+        key=lambda item: (item[1], item[0].casefold()),
+    )
+    return {
+        "topics": [
+            {"name": topic, "mastery": topic_values[topic]}
+            for topic in sorted(topic_values, key=str.casefold)
+        ],
+        "weak": [topic for topic, _ in weak],
+        "has_history": bool(answered_topics),
+        "history": data["history"],
+        "streak_days": data["streak_days"],
+    }
+
+
 @app.get("/files/{file_id}")
 def get_file(file_id: str):
     try:
@@ -364,6 +404,7 @@ def _verified_quiz_batch(
     types: list[str],
     difficulty: str,
     diagnostic: bool = False,
+    diagnostic_source_signature: str | None = None,
 ) -> list[dict]:
     selected_chunks = _select_quiz_chunks(chunks)
     chunks_by_id = {chunk["chunk_id"]: chunk for chunk in selected_chunks}
@@ -384,8 +425,9 @@ def _verified_quiz_batch(
         difficulty=difficulty,
         topics=json.dumps(topics or actual_topics),
         diagnostic_instruction=(
-            "Diagnostic: create exactly five MCQs and spread them across every "
-            "available topic."
+            "Diagnostic: write up to ten MCQs. The backend will select five; "
+            "cover as many different available topics as possible and use each "
+            "topic once before repeating."
             if diagnostic
             else ""
         ),
@@ -529,8 +571,22 @@ def _verified_quiz_batch(
                 "source_citation": _citation(chunk),
                 "source_file_id": chunk["metadata"]["file_id"],
                 "created_at": datetime.now(timezone.utc).isoformat(),
+                "is_diagnostic": diagnostic,
+                "diagnostic_source_signature": (
+                    diagnostic_source_signature if diagnostic else None
+                ),
             }
         )
+    if diagnostic:
+        by_topic: dict[str, list[dict]] = {}
+        for question in saved:
+            by_topic.setdefault(question["topic"], []).append(question)
+        spread = []
+        while any(by_topic.values()):
+            for topic in sorted(by_topic):
+                if by_topic[topic]:
+                    spread.append(by_topic[topic].pop(0))
+        saved = spread if len(spread) == 5 else []
     if saved:
         save_quiz_questions(saved)
     logger.info("QUIZ BATCH: wrote %s, kept %s", len(generated), len(saved))
@@ -572,32 +628,93 @@ def quiz(
 ):
     student_id = student_id.strip() or "anonymous"
     if body.diagnostic:
-        topics = []
-        source_ids = []
-        types = ["mcq"]
-        count = 5
-        difficulty = "mixed"
-    else:
-        if body.count < 3 or body.count > 15:
-            raise HTTPException(status_code=400, detail="count must be between 3 and 15.")
-        if not body.types or any(
-            question_type not in {"mcq", "short", "numerical"}
-            for question_type in body.types
-        ):
-            raise HTTPException(
-                status_code=400,
-                detail="types must include mcq, short, or numerical.",
+        source_signature = get_ready_source_signature()
+        existing_set_size = get_diagnostic_question_count(source_signature)
+        if existing_set_size < 5:
+            chunks = get_quiz_chunks([], [])
+            if not chunks:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No study material for these topics.",
+                )
+            topics = sorted(
+                {chunk["metadata"].get("topic") or "General" for chunk in chunks}
             )
-        if body.difficulty not in {"easy", "medium", "hard", "mixed"}:
+            try:
+                _verified_quiz_batch(
+                    chunks,
+                    topics,
+                    ["mcq"],
+                    "mixed",
+                    diagnostic=True,
+                    diagnostic_source_signature=source_signature,
+                )
+            except (TextBudgetExceeded, GeminiQuotaError) as exc:
+                raise HTTPException(
+                    status_code=429,
+                    detail="Gemini text-call budget or quota is exhausted. Try again later.",
+                ) from exc
+            except GeminiError as exc:
+                detail = str(exc)
+                if exc.error_code == 504:
+                    detail = "Gemini timed out while generating the quiz. Please try again."
+                logger.error("Gemini could not generate diagnostic questions: %s", exc)
+                raise HTTPException(status_code=502, detail=detail) from exc
+        existing = get_unseen_questions(
+            student_id,
+            [],
+            [],
+            ["mcq"],
+            "mixed",
+            diagnostic=True,
+            diagnostic_source_signature=source_signature,
+        )
+        if len(existing) < 5:
+            if existing_set_size >= 5:
+                raise HTTPException(
+                    status_code=409,
+                    detail="You have already used this starter quiz.",
+                )
             raise HTTPException(
-                status_code=400,
-                detail="difficulty must be easy, medium, hard, or mixed.",
+                status_code=502,
+                detail="Gemini could not create five verified diagnostic questions.",
             )
-        topics = list(dict.fromkeys(body.topics))
-        source_ids = list(dict.fromkeys(body.source_ids))
-        types = list(dict.fromkeys(body.types))
-        count = body.count
-        difficulty = body.difficulty
+        by_topic: dict[str, list[dict]] = {}
+        for question in existing:
+            by_topic.setdefault(question["topic"], []).append(question)
+        selected = []
+        while len(selected) < 5 and any(by_topic.values()):
+            for topic in sorted(by_topic):
+                if by_topic[topic] and len(selected) < 5:
+                    selected.append(by_topic[topic].pop(0))
+        served = serve_questions(student_id, [question["id"] for question in selected])
+        if len(served) != 5:
+            raise HTTPException(
+                status_code=409,
+                detail="You have already used this starter quiz.",
+            )
+        return [_public_question(question) for question in served]
+
+    if body.count < 3 or body.count > 15:
+        raise HTTPException(status_code=400, detail="count must be between 3 and 15.")
+    if not body.types or any(
+        question_type not in {"mcq", "short", "numerical"}
+        for question_type in body.types
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="types must include mcq, short, or numerical.",
+        )
+    if body.difficulty not in {"easy", "medium", "hard", "mixed"}:
+        raise HTTPException(
+            status_code=400,
+            detail="difficulty must be easy, medium, hard, or mixed.",
+        )
+    topics = list(dict.fromkeys(body.topics))
+    source_ids = list(dict.fromkeys(body.source_ids))
+    types = list(dict.fromkeys(body.types))
+    count = body.count
+    difficulty = body.difficulty
 
     existing = get_unseen_questions(
         student_id, topics, source_ids, types, difficulty
@@ -629,7 +746,6 @@ def quiz(
                 topics or chunk_topics,
                 types,
                 difficulty,
-                diagnostic=body.diagnostic,
             )
         except (TextBudgetExceeded, GeminiQuotaError) as exc:
             raise HTTPException(
@@ -647,28 +763,8 @@ def quiz(
             student_id, topics, source_ids, types, difficulty
         )
 
-    if body.diagnostic and len(existing) < count:
-        raise HTTPException(
-            status_code=502,
-            detail="Gemini could not create five verified diagnostic questions.",
-        )
-    if body.diagnostic:
-        by_topic: dict[str, list[dict]] = {}
-        for question in existing:
-            by_topic.setdefault(question["topic"], []).append(question)
-        selected = []
-        while len(selected) < count and any(by_topic.values()):
-            for topic in sorted(by_topic):
-                if by_topic[topic] and len(selected) < count:
-                    selected.append(by_topic[topic].pop(0))
-    else:
-        selected = existing[:count]
+    selected = existing[:count]
     served = serve_questions(student_id, [question["id"] for question in selected])
-    if body.diagnostic and len(served) != 5:
-        raise HTTPException(
-            status_code=409,
-            detail="Five new diagnostic questions are not available. Please try again.",
-        )
     return [_public_question(question) for question in served]
 
 
@@ -733,6 +829,7 @@ def quiz_answer(
 
     if not mark_question_answered(student_id, body.question_id):
         raise HTTPException(status_code=400, detail="You already answered this question.")
+    update_student_mastery(student_id, question["topic"], correct)
 
     feedback = (
         f"{'Correct.' if correct else 'Not quite.'} "
