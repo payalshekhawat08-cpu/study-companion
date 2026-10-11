@@ -146,6 +146,40 @@ def initialize_store():
             )
             """
         )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS questions (
+                id TEXT PRIMARY KEY,
+                topic TEXT NOT NULL,
+                type TEXT NOT NULL,
+                difficulty TEXT NOT NULL,
+                question TEXT NOT NULL,
+                options TEXT,
+                correct_answer TEXT NOT NULL,
+                key_terms TEXT NOT NULL,
+                explanation TEXT NOT NULL,
+                misconception_note TEXT,
+                source_citation TEXT NOT NULL,
+                source_file_id TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS student_questions (
+                student_id TEXT NOT NULL,
+                question_id TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('served', 'answered')),
+                answered_at TEXT,
+                PRIMARY KEY (student_id, question_id)
+            )
+            """
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS questions_source_file_id "
+            "ON questions (source_file_id)"
+        )
 
     client = chromadb.PersistentClient(path=str(CHROMA_PATH))
     _collection = client.get_or_create_collection(
@@ -498,6 +532,7 @@ def search_chunks(
     limit: int = TOP_K,
     file_ids: list[str] | None = None,
     file_id: str | None = None,
+    topics: list[str] | None = None,
 ) -> list[dict]:
     collection = _get_collection()
     if collection.count() == 0:
@@ -509,10 +544,15 @@ def search_chunks(
         "include": ["documents", "metadatas", "distances"],
     }
     selected_ids = file_ids or ([file_id] if file_id else None)
+    filters = []
     if selected_ids is not None:
         if not selected_ids:
             return []
-        options["where"] = {"file_id": {"$in": selected_ids}}
+        filters.append({"file_id": {"$in": selected_ids}})
+    if topics:
+        filters.append({"topic": {"$in": topics}})
+    if filters:
+        options["where"] = filters[0] if len(filters) == 1 else {"$and": filters}
 
     results = collection.query(**options)
     return [
@@ -530,3 +570,189 @@ def search_chunks(
             results["distances"][0],
         )
     ]
+
+
+def get_quiz_chunks(topics: list[str], source_ids: list[str]) -> list[dict]:
+    with sqlite3.connect(DATABASE_PATH) as connection:
+        ready_ids = [
+            row[0]
+            for row in connection.execute(
+                "SELECT file_id FROM sources WHERE status = 'ready'"
+            ).fetchall()
+        ]
+
+    selected_ids = sorted(set(source_ids) & set(ready_ids)) if source_ids else ready_ids
+    if not selected_ids:
+        return []
+
+    filters = [{"file_id": {"$in": selected_ids}}]
+    if topics:
+        filters.append({"topic": {"$in": topics}})
+    where = filters[0] if len(filters) == 1 else {"$and": filters}
+    result = _get_collection().get(
+        where=where,
+        include=["documents", "metadatas"],
+    )
+    chunks = [
+        {
+            "chunk_id": chunk_id,
+            "text": text,
+            "metadata": metadata,
+        }
+        for chunk_id, text, metadata in zip(
+            result["ids"], result["documents"], result["metadatas"]
+        )
+    ]
+    return sorted(chunks, key=lambda chunk: (chunk["metadata"].get("topic", ""), chunk["chunk_id"]))
+
+
+def get_unseen_questions(
+    student_id: str,
+    topics: list[str],
+    source_ids: list[str],
+    types: list[str],
+    difficulty: str,
+) -> list[dict]:
+    clauses = [
+        "sq.question_id IS NULL",
+        "s.status = 'ready'",
+        "q.type IN ({})".format(",".join("?" for _ in types)),
+    ]
+    values: list[str] = [student_id, *types]
+    if topics:
+        clauses.append("q.topic IN ({})".format(",".join("?" for _ in topics)))
+        values.extend(topics)
+    if source_ids:
+        clauses.append("q.source_file_id IN ({})".format(",".join("?" for _ in source_ids)))
+        values.extend(source_ids)
+    if difficulty != "mixed":
+        clauses.append("q.difficulty = ?")
+        values.append(difficulty)
+
+    with sqlite3.connect(DATABASE_PATH) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT q.*
+            FROM questions AS q
+            JOIN sources AS s ON s.file_id = q.source_file_id
+            LEFT JOIN student_questions AS sq
+                ON sq.question_id = q.id AND sq.student_id = ?
+            WHERE {}
+            ORDER BY q.created_at, q.id
+            """.format(" AND ".join(clauses)),
+            values,
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_recent_question_texts(topics: list[str]) -> dict[str, list[str]]:
+    if not topics:
+        return {}
+    placeholders = ",".join("?" for _ in topics)
+    with sqlite3.connect(DATABASE_PATH) as connection:
+        rows = connection.execute(
+            """
+            SELECT topic, question
+            FROM questions
+            WHERE topic IN ({})
+            ORDER BY created_at DESC
+            """.format(placeholders),
+            topics,
+        ).fetchall()
+    recent: dict[str, list[str]] = {topic: [] for topic in topics}
+    for topic, question in rows:
+        if topic in recent and len(recent[topic]) < 20:
+            recent[topic].append(question)
+    return recent
+
+
+def save_quiz_questions(questions: list[dict]):
+    with sqlite3.connect(DATABASE_PATH) as connection:
+        connection.executemany(
+            """
+            INSERT INTO questions (
+                id, topic, type, difficulty, question, options, correct_answer,
+                key_terms, explanation, misconception_note, source_citation,
+                source_file_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    question["id"],
+                    question["topic"],
+                    question["type"],
+                    question["difficulty"],
+                    question["question"],
+                    json.dumps(question["options"]) if question["options"] is not None else None,
+                    question["correct_answer"],
+                    json.dumps(question["key_terms"]),
+                    question["explanation"],
+                    question["misconception_note"],
+                    json.dumps(question["source_citation"]),
+                    question["source_file_id"],
+                    question["created_at"],
+                )
+                for question in questions
+            ],
+        )
+
+
+def serve_questions(student_id: str, question_ids: list[str]) -> list[dict]:
+    if not question_ids:
+        return []
+    newly_served = []
+    with sqlite3.connect(DATABASE_PATH) as connection:
+        for question_id in question_ids:
+            cursor = connection.execute(
+                """
+                INSERT OR IGNORE INTO student_questions
+                    (student_id, question_id, status, answered_at)
+                VALUES (?, ?, 'served', NULL)
+                """,
+                (student_id, question_id),
+            )
+            if cursor.rowcount == 1:
+                newly_served.append(question_id)
+        connection.row_factory = sqlite3.Row
+        placeholders = ",".join("?" for _ in newly_served)
+        if not newly_served:
+            return []
+        rows = connection.execute(
+            "SELECT * FROM questions WHERE id IN ({})".format(placeholders),
+            newly_served,
+        ).fetchall()
+        questions_by_id = {row["id"]: dict(row) for row in rows}
+    return [questions_by_id[question_id] for question_id in newly_served]
+
+
+def get_question(question_id: str) -> dict | None:
+    with sqlite3.connect(DATABASE_PATH) as connection:
+        connection.row_factory = sqlite3.Row
+        row = connection.execute(
+            "SELECT * FROM questions WHERE id = ?", (question_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_student_question_status(student_id: str, question_id: str) -> str | None:
+    with sqlite3.connect(DATABASE_PATH) as connection:
+        row = connection.execute(
+            "SELECT status FROM student_questions "
+            "WHERE student_id = ? AND question_id = ?",
+            (student_id, question_id),
+        ).fetchone()
+    return row[0] if row else None
+
+
+def mark_question_answered(student_id: str, question_id: str) -> bool:
+    with sqlite3.connect(DATABASE_PATH) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE student_questions
+            SET status = 'answered', answered_at = ?
+            WHERE student_id = ? AND question_id = ? AND status = 'served'
+            """,
+            (datetime.now(timezone.utc).isoformat(), student_id, question_id),
+        )
+    return cursor.rowcount == 1

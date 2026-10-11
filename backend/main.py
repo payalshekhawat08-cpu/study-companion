@@ -1,12 +1,22 @@
 import json
 import logging
+import math
 import re
 import sqlite3
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import (
+    BackgroundTasks,
+    FastAPI,
+    File,
+    Header,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -21,15 +31,23 @@ from gemini_client import (
     generate_json,
 )
 from ingest import MAX_FILE_SIZE, MAX_VIDEO_FILE_SIZE, process_source
-from prompts import GROUNDED_ANSWER_PROMPT
+from prompts import GROUNDED_ANSWER_PROMPT, QUIZ_VERIFY_PROMPT, QUIZ_WRITE_PROMPT
 from store import (
     create_source,
+    get_question,
+    get_quiz_chunks,
+    get_recent_question_texts,
     get_source,
+    get_student_question_status,
     get_topics,
+    get_unseen_questions,
     initialize_store,
+    mark_question_answered,
     fail_interrupted_sources,
     list_sources,
+    save_quiz_questions,
     search_chunks,
+    serve_questions,
     start_source_retry,
     TextBudgetExceeded,
 )
@@ -46,6 +64,20 @@ app = FastAPI()
 class AskRequest(BaseModel):
     question: str = Field(min_length=1)
     source_ids: list[str] = Field(default_factory=list)
+
+
+class QuizRequest(BaseModel):
+    topics: list[str] = Field(default_factory=list)
+    source_ids: list[str] = Field(default_factory=list)
+    types: list[str] = Field(default_factory=lambda: ["mcq", "short", "numerical"])
+    count: int = 5
+    difficulty: str = "mixed"
+    diagnostic: bool = False
+
+
+class QuizAnswerRequest(BaseModel):
+    question_id: str
+    answer: str | int | float
 
 
 @app.on_event("startup")
@@ -310,6 +342,411 @@ def _citation(chunk: dict) -> dict:
         "location": location,
         "excerpt": excerpt,
     }
+
+
+def _select_quiz_chunks(chunks: list[dict], limit: int = 30) -> list[dict]:
+    by_topic: dict[str, list[dict]] = {}
+    for chunk in chunks:
+        topic = chunk["metadata"].get("topic") or "General"
+        by_topic.setdefault(topic, []).append(chunk)
+
+    selected = []
+    while len(selected) < limit and any(by_topic.values()):
+        for topic in sorted(by_topic):
+            if by_topic[topic] and len(selected) < limit:
+                selected.append(by_topic[topic].pop(0))
+    return selected
+
+
+def _verified_quiz_batch(
+    chunks: list[dict],
+    topics: list[str],
+    types: list[str],
+    difficulty: str,
+    diagnostic: bool = False,
+) -> list[dict]:
+    selected_chunks = _select_quiz_chunks(chunks)
+    chunks_by_id = {chunk["chunk_id"]: chunk for chunk in selected_chunks}
+    actual_topics = sorted(
+        {chunk["metadata"].get("topic") or "General" for chunk in chunks}
+    )
+    recent = get_recent_question_texts(actual_topics)
+    chunk_data = [
+        {
+            "chunk_id": chunk["chunk_id"],
+            "topic": chunk["metadata"].get("topic") or "General",
+            "text": chunk["text"],
+        }
+        for chunk in selected_chunks
+    ]
+    prompt = QUIZ_WRITE_PROMPT.format(
+        types=json.dumps(types),
+        difficulty=difficulty,
+        topics=json.dumps(topics or actual_topics),
+        diagnostic_instruction=(
+            "Diagnostic: create exactly five MCQs and spread them across every "
+            "available topic."
+            if diagnostic
+            else ""
+        ),
+        chunks=json.dumps(chunk_data, ensure_ascii=False),
+        recent=json.dumps(recent, ensure_ascii=False),
+    )
+    try:
+        write_result = json.loads(generate_json(prompt, stage="quiz write"))
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Gemini returned invalid JSON while writing quiz questions.",
+        ) from exc
+    if not isinstance(write_result, dict) or not isinstance(
+        write_result.get("questions"), list
+    ):
+        raise HTTPException(
+            status_code=502,
+            detail="Gemini returned an invalid quiz question list.",
+        )
+    generated = write_result["questions"][:10]
+    verification_data = []
+    for index, item in enumerate(generated):
+        chunk = chunks_by_id.get(item.get("chunk_id")) if isinstance(item, dict) else None
+        verification_data.append(
+            {
+                "index": index,
+                "question": item,
+                "chunk_text": chunk["text"] if chunk else "",
+            }
+        )
+    verify_prompt = QUIZ_VERIFY_PROMPT.format(
+        questions=json.dumps(verification_data, ensure_ascii=False)
+    )
+    try:
+        verify_result = json.loads(generate_json(verify_prompt, stage="quiz verify"))
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Gemini returned invalid JSON while verifying quiz questions.",
+        ) from exc
+    if not isinstance(verify_result, dict) or not isinstance(
+        verify_result.get("results"), list
+    ):
+        raise HTTPException(
+            status_code=502,
+            detail="Gemini returned an invalid quiz verification list.",
+        )
+
+    verified = {
+        result.get("index")
+        for result in verify_result["results"]
+        if (
+            isinstance(result, dict)
+            and isinstance(result.get("index"), int)
+            and not isinstance(result.get("index"), bool)
+            and result.get("status") == "OK"
+        )
+    }
+    allowed_topics = set(topics or actual_topics)
+    saved = []
+    for index, item in enumerate(generated):
+        if index not in verified or not isinstance(item, dict):
+            continue
+        chunk = chunks_by_id.get(item.get("chunk_id"))
+        question_type = item.get("type")
+        topic = item.get("topic")
+        chunk_topic = chunk["metadata"].get("topic") or "General" if chunk else None
+        question_text = item.get("question")
+        explanation = item.get("explanation")
+        if (
+            chunk is None
+            or question_type not in types
+            or topic not in allowed_topics
+            or topic != chunk_topic
+            or not isinstance(question_text, str)
+            or not question_text.strip()
+            or not isinstance(explanation, str)
+            or not explanation.strip()
+        ):
+            continue
+
+        question_difficulty = item.get("difficulty")
+        if question_difficulty not in {"easy", "medium", "hard"}:
+            continue
+        if difficulty != "mixed" and question_difficulty != difficulty:
+            continue
+
+        options = None
+        key_terms = item.get("key_terms", [])
+        if question_type == "mcq":
+            options = item.get("options")
+            correct_index = item.get("correct_index")
+            generated_answer = item.get("correct_answer")
+            if (
+                not isinstance(options, list)
+                or len(options) < 2
+                or any(not isinstance(option, str) or not option.strip() for option in options)
+                or not isinstance(correct_index, int)
+                or isinstance(correct_index, bool)
+                or correct_index < 0
+                or correct_index >= len(options)
+                or not isinstance(generated_answer, str)
+                or generated_answer.strip() != options[correct_index].strip()
+            ):
+                continue
+            correct_answer = str(correct_index)
+            key_terms = []
+        else:
+            answer_value = item.get("correct_answer")
+            if not isinstance(answer_value, (str, int, float)) or isinstance(answer_value, bool):
+                continue
+            correct_answer = str(answer_value)
+            if question_type == "short":
+                if (
+                    not isinstance(key_terms, list)
+                    or not key_terms
+                    or any(not isinstance(term, str) or not term.strip() for term in key_terms)
+                ):
+                    continue
+            elif question_type == "numerical":
+                if _extract_number(correct_answer) is None:
+                    continue
+                key_terms = []
+
+        misconception = item.get("misconception_note")
+        if not isinstance(misconception, str) or not misconception.strip():
+            misconception = None
+        saved.append(
+            {
+                "id": str(uuid.uuid4()),
+                "topic": topic,
+                "type": question_type,
+                "difficulty": question_difficulty,
+                "question": question_text.strip(),
+                "options": options,
+                "correct_answer": correct_answer,
+                "key_terms": key_terms,
+                "explanation": explanation.strip(),
+                "misconception_note": misconception,
+                "source_citation": _citation(chunk),
+                "source_file_id": chunk["metadata"]["file_id"],
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+    if saved:
+        save_quiz_questions(saved)
+    logger.info("QUIZ BATCH: wrote %s, kept %s", len(generated), len(saved))
+    return saved
+
+
+def _extract_number(value) -> float | None:
+    if not isinstance(value, (str, int, float)) or isinstance(value, bool):
+        return None
+    text = str(value).replace(",", "")
+    match = re.search(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?", text)
+    if not match:
+        return None
+    try:
+        number = float(match.group())
+    except ValueError:
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _public_question(question: dict) -> dict:
+    response = {
+        "id": question["id"],
+        "type": question["type"],
+        "question": question["question"],
+        "topic": question["topic"],
+        "difficulty": question["difficulty"],
+        "source": json.loads(question["source_citation"]),
+    }
+    if question["type"] == "mcq":
+        response["options"] = json.loads(question["options"])
+    return response
+
+
+@app.post("/quiz")
+def quiz(
+    body: QuizRequest,
+    student_id: str = Header(default="anonymous", alias="X-Student-Id"),
+):
+    student_id = student_id.strip() or "anonymous"
+    if body.diagnostic:
+        topics = []
+        source_ids = []
+        types = ["mcq"]
+        count = 5
+        difficulty = "mixed"
+    else:
+        if body.count < 3 or body.count > 15:
+            raise HTTPException(status_code=400, detail="count must be between 3 and 15.")
+        if not body.types or any(
+            question_type not in {"mcq", "short", "numerical"}
+            for question_type in body.types
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="types must include mcq, short, or numerical.",
+            )
+        if body.difficulty not in {"easy", "medium", "hard", "mixed"}:
+            raise HTTPException(
+                status_code=400,
+                detail="difficulty must be easy, medium, hard, or mixed.",
+            )
+        topics = list(dict.fromkeys(body.topics))
+        source_ids = list(dict.fromkeys(body.source_ids))
+        types = list(dict.fromkeys(body.types))
+        count = body.count
+        difficulty = body.difficulty
+
+    existing = get_unseen_questions(
+        student_id, topics, source_ids, types, difficulty
+    )
+    if len(existing) < count:
+        chunks = get_quiz_chunks(topics, source_ids)
+        if not chunks:
+            raise HTTPException(
+                status_code=400,
+                detail="No study material for these topics.",
+            )
+        try:
+            chunk_topics = sorted(
+                {chunk["metadata"].get("topic") or "General" for chunk in chunks}
+            )
+            retrieval_query = (
+                "Study questions about " + ", ".join(topics or chunk_topics)
+            )
+            ranked_chunks = search_chunks(
+                embed_query(retrieval_query),
+                limit=30,
+                file_ids=sorted({chunk["metadata"]["file_id"] for chunk in chunks}),
+                topics=topics,
+            )
+            if ranked_chunks:
+                chunks = ranked_chunks
+            _verified_quiz_batch(
+                chunks,
+                topics or chunk_topics,
+                types,
+                difficulty,
+                diagnostic=body.diagnostic,
+            )
+        except (TextBudgetExceeded, GeminiQuotaError) as exc:
+            raise HTTPException(
+                status_code=429,
+                detail="Gemini text-call budget or quota is exhausted. Try again later.",
+            ) from exc
+        except GeminiError as exc:
+            status_code = 502
+            detail = str(exc)
+            if exc.error_code == 504:
+                detail = "Gemini timed out while generating the quiz. Please try again."
+            logger.error("Gemini could not generate quiz questions: %s", exc)
+            raise HTTPException(status_code=status_code, detail=detail) from exc
+        existing = get_unseen_questions(
+            student_id, topics, source_ids, types, difficulty
+        )
+
+    if body.diagnostic and len(existing) < count:
+        raise HTTPException(
+            status_code=502,
+            detail="Gemini could not create five verified diagnostic questions.",
+        )
+    if body.diagnostic:
+        by_topic: dict[str, list[dict]] = {}
+        for question in existing:
+            by_topic.setdefault(question["topic"], []).append(question)
+        selected = []
+        while len(selected) < count and any(by_topic.values()):
+            for topic in sorted(by_topic):
+                if by_topic[topic] and len(selected) < count:
+                    selected.append(by_topic[topic].pop(0))
+    else:
+        selected = existing[:count]
+    served = serve_questions(student_id, [question["id"] for question in selected])
+    if body.diagnostic and len(served) != 5:
+        raise HTTPException(
+            status_code=409,
+            detail="Five new diagnostic questions are not available. Please try again.",
+        )
+    return [_public_question(question) for question in served]
+
+
+@app.post("/quiz/answer")
+def quiz_answer(
+    body: QuizAnswerRequest,
+    student_id: str = Header(default="anonymous", alias="X-Student-Id"),
+):
+    student_id = student_id.strip() or "anonymous"
+    question = get_question(body.question_id)
+    if question is None:
+        raise HTTPException(status_code=404, detail="Question not found.")
+
+    status = get_student_question_status(student_id, body.question_id)
+    if status == "answered":
+        raise HTTPException(status_code=400, detail="You already answered this question.")
+    if status != "served":
+        raise HTTPException(
+            status_code=400,
+            detail="This question was not served to this student.",
+        )
+
+    try:
+        options = json.loads(question["options"]) if question["options"] else []
+        key_terms = json.loads(question["key_terms"])
+        citation = json.loads(question["source_citation"])
+    except json.JSONDecodeError as exc:
+        logger.error("Stored quiz question %s contains invalid JSON.", body.question_id)
+        raise HTTPException(status_code=500, detail="Stored question data is invalid.") from exc
+
+    correct_answer = question["correct_answer"]
+    correct = False
+    if question["type"] == "mcq":
+        if not isinstance(body.answer, int) or isinstance(body.answer, bool):
+            raise HTTPException(status_code=400, detail="MCQ answers must be an option index.")
+        try:
+            correct_index = int(correct_answer)
+        except ValueError as exc:
+            raise HTTPException(status_code=500, detail="Stored correct answer is invalid.") from exc
+        correct = body.answer == correct_index
+        if correct_index < 0 or correct_index >= len(options):
+            raise HTTPException(status_code=500, detail="Stored correct answer is invalid.")
+        correct_answer = options[correct_index]
+    elif question["type"] == "numerical":
+        expected = _extract_number(question["correct_answer"])
+        actual = _extract_number(body.answer)
+        if expected is None:
+            raise HTTPException(status_code=500, detail="Stored numeric answer is invalid.")
+        if actual is None:
+            raise HTTPException(status_code=400, detail="Numerical answers must contain a number.")
+        correct = math.isclose(actual, expected, rel_tol=0.01, abs_tol=1e-6)
+    elif question["type"] == "short":
+        if not isinstance(body.answer, str):
+            raise HTTPException(status_code=400, detail="Short answers must be text.")
+        answer_text = body.answer.casefold()
+        if key_terms:
+            correct = sum(
+                1 for term in key_terms if isinstance(term, str) and term.casefold() in answer_text
+            ) * 2 >= len(key_terms)
+    else:
+        raise HTTPException(status_code=500, detail="Stored question type is invalid.")
+
+    if not mark_question_answered(student_id, body.question_id):
+        raise HTTPException(status_code=400, detail="You already answered this question.")
+
+    feedback = (
+        f"{'Correct.' if correct else 'Not quite.'} "
+        f"{question['explanation']} Source: {citation['label']}."
+    )
+    result = {
+        "correct": correct,
+        "feedback": feedback,
+        "citation": citation,
+        "correct_answer": correct_answer,
+    }
+    if not correct and question["misconception_note"]:
+        result["misconception"] = question["misconception_note"]
+    return result
 
 
 def _not_grounded():
