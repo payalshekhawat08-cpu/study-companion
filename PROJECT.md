@@ -105,5 +105,5 @@ Example labels: "Textbook p.12", "Lecture 1, 14:32".
   (needed for simulated students in the evaluation).
 
 - ## Current status (update after every finished step)
-- Backend:- /health, PDF ingestion (with retries) and grounded /ask work. Next: slides and YouTube ingestion, then quizzes.
+- Backend: ingestion of PDF, slides and YouTube, /library, /topics and grounded /ask work and are tested. Next: quizzes, /quiz/answer, learner model and /mastery.
 - Frontend: building from Frontend/FRONTEND_PLAN.md, phase by phase, with mock data (teammate updates this line).
