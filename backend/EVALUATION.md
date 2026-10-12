@@ -38,19 +38,34 @@ The default command is a dry run:
 .\venv\Scripts\python.exe .\backend\eval_ragas.py
 ```
 
-It prints all five test questions, writes fake scores to prove the output works,
-and makes **zero Gemini calls**. A real run requires explicit opt-in:
+It prints all five test questions, builds and previews the judge prompt using
+fake records, writes fake scores to prove the output works, and makes **zero
+Gemini calls**. The prompt builder can also be tested by itself, offline:
+
+```powershell
+.\venv\Scripts\python.exe .\backend\test_eval_ragas.py
+```
+
+A real run requires explicit opt-in:
 
 ```powershell
 .\venv\Scripts\python.exe .\backend\eval_ragas.py --real
 ```
 
-The real run checks that up to six text calls remain available before doing
-anything with Gemini. It asks the existing backend question-answering logic for
-each test question and scores all answers together in one judge call. Up to six
-calls count against the daily text-call limit; the five query embeddings are
-additional Gemini requests but are not text calls. Depending on retrieval, the
-run makes up to eleven Gemini requests total. The actual counts are saved in
+Each completed answer and its retrieved context are saved immediately to
+`backend\eval_results\answers_cache.json`, before the judge runs. To reuse those
+answers after an interrupted or failed evaluation, run:
+
+```powershell
+.\venv\Scripts\python.exe .\backend\eval_ragas.py --real --reuse-answers
+```
+
+The real run reports the cached-answer count and planned text-call count, then
+checks that the daily budget covers all missing answer calls and one judge call
+before using Gemini. The five query embeddings are additional Gemini requests
+but are not text calls; reused answers need no query embedding. Depending on
+retrieval and cache contents, the run makes up to eleven Gemini requests total.
+The actual counts are saved in
 `backend\eval_results\ragas.json` and shown in
 `backend\eval_results\ragas.md`. The off-topic question passes when the backend
 returns `grounded: false`.
