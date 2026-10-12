@@ -34,8 +34,10 @@ from ingest import MAX_FILE_SIZE, MAX_VIDEO_FILE_SIZE, process_source
 from prompts import GROUNDED_ANSWER_PROMPT, QUIZ_VERIFY_PROMPT, QUIZ_WRITE_PROMPT
 from store import (
     create_source,
+    get_available_mcq_questions,
     get_question,
-    get_diagnostic_question_count,
+    get_diagnostic_set_questions,
+    get_diagnostic_set_size,
     get_quiz_chunks,
     get_ready_source_signature,
     get_recent_question_texts,
@@ -49,6 +51,7 @@ from store import (
     fail_interrupted_sources,
     list_sources,
     save_quiz_questions,
+    save_diagnostic_set,
     search_chunks,
     serve_questions,
     start_source_retry,
@@ -398,6 +401,34 @@ def _select_quiz_chunks(chunks: list[dict], limit: int = 30) -> list[dict]:
     return selected
 
 
+def _spread_questions(
+    questions: list[dict],
+    limit: int = 5,
+    unique_topics_only: bool = False,
+) -> list[dict]:
+    by_topic: dict[str, list[dict]] = {}
+    seen_ids = set()
+    for question in questions:
+        if question["id"] in seen_ids:
+            continue
+        seen_ids.add(question["id"])
+        by_topic.setdefault(question["topic"], []).append(question)
+
+    selected = []
+    topics = sorted(by_topic, key=str.casefold)
+    for topic in topics:
+        if by_topic[topic] and len(selected) < limit:
+            selected.append(by_topic[topic].pop(0))
+    if unique_topics_only:
+        return selected
+
+    while len(selected) < limit and any(by_topic.values()):
+        for topic in topics:
+            if by_topic[topic] and len(selected) < limit:
+                selected.append(by_topic[topic].pop(0))
+    return selected
+
+
 def _verified_quiz_batch(
     chunks: list[dict],
     topics: list[str],
@@ -425,103 +456,102 @@ def _verified_quiz_batch(
         difficulty=difficulty,
         topics=json.dumps(topics or actual_topics),
         diagnostic_instruction=(
-            "Diagnostic: write up to ten MCQs. The backend will select five; "
-            "cover as many different available topics as possible and use each "
-            "topic once before repeating."
+            "Diagnostic: write ten candidate MCQs. The backend will select at "
+            "most five; cover as many different available topics as possible "
+            "and use each topic once before repeating."
             if diagnostic
             else ""
         ),
         chunks=json.dumps(chunk_data, ensure_ascii=False),
         recent=json.dumps(recent, ensure_ascii=False),
     )
+    requested = 10
     try:
-        write_result = json.loads(generate_json(prompt, stage="quiz write"))
+        write_text = generate_json(prompt, stage="quiz write")
+    except (GeminiError, TextBudgetExceeded):
+        logger.error(
+            "QUIZ WRITE: asked for %s, Gemini returned no response, valid after reading the JSON 0",
+            requested,
+        )
+        logger.info("QUIZ VERIFY: checked 0, OK 0, WRONG 0 (write call failed)")
+        logger.exception("QUIZ WRITE: Gemini call failed.")
+        raise
+    try:
+        write_result = json.loads(write_text)
     except json.JSONDecodeError as exc:
+        logger.error("QUIZ WRITE: could not read JSON: %s", write_text[:200])
+        logger.error(
+            "QUIZ WRITE: asked for %s, Gemini returned unreadable JSON, valid after reading the JSON 0",
+            requested,
+        )
+        logger.info("QUIZ VERIFY: checked 0, OK 0, WRONG 0 (write JSON was invalid)")
         raise HTTPException(
             status_code=502,
-            detail="Gemini returned invalid JSON while writing quiz questions.",
+            detail=f"Gemini returned invalid JSON while writing quiz questions: {write_text[:200]}",
         ) from exc
-    if not isinstance(write_result, dict) or not isinstance(
-        write_result.get("questions"), list
-    ):
-        raise HTTPException(
-            status_code=502,
-            detail="Gemini returned an invalid quiz question list.",
-        )
-    generated = write_result["questions"][:10]
-    verification_data = []
-    for index, item in enumerate(generated):
-        chunk = chunks_by_id.get(item.get("chunk_id")) if isinstance(item, dict) else None
-        verification_data.append(
-            {
-                "index": index,
-                "question": item,
-                "chunk_text": chunk["text"] if chunk else "",
-            }
-        )
-    verify_prompt = QUIZ_VERIFY_PROMPT.format(
-        questions=json.dumps(verification_data, ensure_ascii=False)
+    generated = (
+        write_result.get("questions")
+        if isinstance(write_result, dict)
+        and isinstance(write_result.get("questions"), list)
+        else []
     )
-    try:
-        verify_result = json.loads(generate_json(verify_prompt, stage="quiz verify"))
-    except json.JSONDecodeError as exc:
+    returned_count = len(generated)
+    if not generated:
+        logger.info(
+            "QUIZ WRITE: asked for %s, Gemini returned 0, valid after reading the JSON 0",
+            requested,
+        )
+        logger.info("QUIZ VERIFY: checked 0, OK 0, WRONG 0 (no candidates to verify)")
         raise HTTPException(
             status_code=502,
-            detail="Gemini returned invalid JSON while verifying quiz questions.",
-        ) from exc
-    if not isinstance(verify_result, dict) or not isinstance(
-        verify_result.get("results"), list
-    ):
-        raise HTTPException(
-            status_code=502,
-            detail="Gemini returned an invalid quiz verification list.",
+            detail="Gemini returned no quiz questions in a valid questions list.",
         )
 
-    verified = {
-        result.get("index")
-        for result in verify_result["results"]
-        if (
-            isinstance(result, dict)
-            and isinstance(result.get("index"), int)
-            and not isinstance(result.get("index"), bool)
-            and result.get("status") == "OK"
-        )
-    }
+    generated = generated[:requested]
+    valid_candidates = []
     allowed_topics = set(topics or actual_topics)
-    saved = []
     for index, item in enumerate(generated):
-        if index not in verified or not isinstance(item, dict):
+        if not isinstance(item, dict):
+            logger.warning("QUIZ WRITE: candidate %s skipped: not a JSON object", index)
             continue
-        chunk = chunks_by_id.get(item.get("chunk_id"))
+        chunk_id = item.get("chunk_id")
+        chunk = chunks_by_id.get(chunk_id) if isinstance(chunk_id, str) else None
         question_type = item.get("type")
         topic = item.get("topic")
-        chunk_topic = chunk["metadata"].get("topic") or "General" if chunk else None
         question_text = item.get("question")
         explanation = item.get("explanation")
-        if (
-            chunk is None
-            or question_type not in types
-            or topic not in allowed_topics
-            or topic != chunk_topic
-            or not isinstance(question_text, str)
-            or not question_text.strip()
-            or not isinstance(explanation, str)
-            or not explanation.strip()
-        ):
-            continue
-
         question_difficulty = item.get("difficulty")
-        if question_difficulty not in {"easy", "medium", "hard"}:
-            continue
-        if difficulty != "mixed" and question_difficulty != difficulty:
+        problem = ""
+        if chunk is None:
+            problem = "unknown chunk_id"
+        elif not isinstance(question_type, str) or question_type not in types:
+            problem = "unsupported question type"
+        elif not isinstance(topic, str) or topic not in allowed_topics or topic != (
+            chunk["metadata"].get("topic") or "General"
+        ):
+            problem = "topic does not match its source chunk"
+        elif not isinstance(question_text, str) or not question_text.strip():
+            problem = "missing question text"
+        elif not isinstance(explanation, str) or not explanation.strip():
+            problem = "missing explanation"
+        elif not isinstance(question_difficulty, str) or question_difficulty not in {
+            "easy",
+            "medium",
+            "hard",
+        }:
+            problem = "invalid difficulty"
+        elif difficulty != "mixed" and question_difficulty != difficulty:
+            problem = "difficulty does not match request"
+        if problem:
+            logger.warning("QUIZ WRITE: candidate %s skipped: %s", index, problem)
             continue
 
         options = None
         key_terms = item.get("key_terms", [])
+        answer_value = item.get("correct_answer")
         if question_type == "mcq":
             options = item.get("options")
             correct_index = item.get("correct_index")
-            generated_answer = item.get("correct_answer")
             if (
                 not isinstance(options, list)
                 or len(options) < 2
@@ -530,63 +560,151 @@ def _verified_quiz_batch(
                 or isinstance(correct_index, bool)
                 or correct_index < 0
                 or correct_index >= len(options)
-                or not isinstance(generated_answer, str)
-                or generated_answer.strip() != options[correct_index].strip()
+                or not isinstance(answer_value, str)
+                or answer_value.strip() != options[correct_index].strip()
             ):
+                logger.warning(
+                    "QUIZ WRITE: candidate %s skipped: invalid MCQ options or correct answer",
+                    index,
+                )
                 continue
             correct_answer = str(correct_index)
             key_terms = []
-        else:
-            answer_value = item.get("correct_answer")
-            if not isinstance(answer_value, (str, int, float)) or isinstance(answer_value, bool):
+        elif question_type == "short":
+            if (
+                not isinstance(answer_value, (str, int, float))
+                or isinstance(answer_value, bool)
+                or not isinstance(key_terms, list)
+                or not key_terms
+                or any(not isinstance(term, str) or not term.strip() for term in key_terms)
+            ):
+                logger.warning(
+                    "QUIZ WRITE: candidate %s skipped: missing short-answer key terms",
+                    index,
+                )
                 continue
             correct_answer = str(answer_value)
-            if question_type == "short":
-                if (
-                    not isinstance(key_terms, list)
-                    or not key_terms
-                    or any(not isinstance(term, str) or not term.strip() for term in key_terms)
-                ):
-                    continue
-            elif question_type == "numerical":
-                if _extract_number(correct_answer) is None:
-                    continue
-                key_terms = []
+        elif question_type == "numerical":
+            if (
+                not isinstance(answer_value, (str, int, float))
+                or isinstance(answer_value, bool)
+                or _extract_number(answer_value) is None
+            ):
+                logger.warning(
+                    "QUIZ WRITE: candidate %s skipped: invalid numerical answer",
+                    index,
+                )
+                continue
+            correct_answer = str(answer_value)
+            key_terms = []
+        else:
+            continue
 
         misconception = item.get("misconception_note")
         if not isinstance(misconception, str) or not misconception.strip():
             misconception = None
-        saved.append(
-            {
-                "id": str(uuid.uuid4()),
-                "topic": topic,
-                "type": question_type,
-                "difficulty": question_difficulty,
-                "question": question_text.strip(),
-                "options": options,
-                "correct_answer": correct_answer,
-                "key_terms": key_terms,
-                "explanation": explanation.strip(),
-                "misconception_note": misconception,
-                "source_citation": _citation(chunk),
-                "source_file_id": chunk["metadata"]["file_id"],
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "is_diagnostic": diagnostic,
-                "diagnostic_source_signature": (
-                    diagnostic_source_signature if diagnostic else None
-                ),
-            }
+        normalized = {
+            "id": str(uuid.uuid4()),
+            "topic": topic,
+            "type": question_type,
+            "difficulty": question_difficulty,
+            "question": question_text.strip(),
+            "options": options,
+            "correct_answer": correct_answer,
+            "key_terms": key_terms,
+            "explanation": explanation.strip(),
+            "misconception_note": misconception,
+            "source_citation": _citation(chunk),
+            "source_file_id": chunk["metadata"]["file_id"],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "is_diagnostic": diagnostic,
+            "diagnostic_source_signature": (
+                diagnostic_source_signature if diagnostic else None
+            ),
+        }
+        valid_candidates.append((index, item, chunk, normalized))
+
+    logger.info(
+        "QUIZ WRITE: asked for %s, Gemini returned %s, valid after reading the JSON %s",
+        requested,
+        returned_count,
+        len(valid_candidates),
+    )
+    verification_data = [
+        {
+            "index": index,
+            "question": item,
+            "chunk_text": chunk["text"],
+        }
+        for index, item, chunk, _ in valid_candidates
+    ]
+    verify_prompt = QUIZ_VERIFY_PROMPT.format(
+        questions=json.dumps(verification_data, ensure_ascii=False)
+    )
+    try:
+        verify_text = generate_json(verify_prompt, stage="quiz verify")
+    except GeminiError:
+        logger.error(
+            "QUIZ VERIFY: checked %s, OK 0, WRONG %s",
+            len(valid_candidates),
+            len(valid_candidates),
         )
-    if diagnostic:
-        by_topic: dict[str, list[dict]] = {}
-        for question in saved:
-            by_topic.setdefault(question["topic"], []).append(question)
-        spread = []
-        while any(by_topic.values()):
-            for topic in sorted(by_topic):
-                if by_topic[topic]:
-                    spread.append(by_topic[topic].pop(0))
-        saved = spread if len(spread) == 5 else []
+        logger.exception("QUIZ VERIFY: Gemini call failed.")
+        raise
+    try:
+        verify_result = json.loads(verify_text)
+    except json.JSONDecodeError as exc:
+        logger.error("QUIZ VERIFY: could not read JSON: %s", verify_text[:200])
+        logger.error(
+            "QUIZ VERIFY: checked %s, OK 0, WRONG %s",
+            len(valid_candidates),
+            len(valid_candidates),
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"Gemini returned invalid JSON while verifying quiz questions: {verify_text[:200]}",
+        ) from exc
+    if not isinstance(verify_result, dict) or not isinstance(
+        verify_result.get("results"), list
+    ):
+        logger.error("QUIZ VERIFY: returned invalid verification JSON: %s", verify_text[:200])
+        logger.error(
+            "QUIZ VERIFY: checked %s, OK 0, WRONG %s",
+            len(valid_candidates),
+            len(valid_candidates),
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Gemini returned an invalid quiz verification list.",
+        )
+
+    outcomes = {
+        result.get("index"): result
+        for result in verify_result["results"]
+        if isinstance(result, dict)
+        and isinstance(result.get("index"), int)
+        and not isinstance(result.get("index"), bool)
+    }
+    saved = []
+    wrong = []
+    for index, _, _, normalized in valid_candidates:
+        result = outcomes.get(index)
+        if result and result.get("status") == "OK":
+            saved.append(normalized)
+        else:
+            reason = result.get("reason") if result else None
+            if not isinstance(reason, str) or not reason.strip():
+                reason = "verification marked WRONG" if result else "no verification result"
+            reason = re.sub(r"\s+", " ", str(reason)).strip()[:100]
+            wrong.append((index, reason))
+            logger.warning("QUIZ VERIFY: question %s WRONG: %s", index, reason)
+
+    logger.info(
+        "QUIZ VERIFY: checked %s, OK %s, WRONG %s",
+        len(valid_candidates),
+        len(saved),
+        len(wrong),
+    )
     if saved:
         save_quiz_questions(saved)
     logger.info("QUIZ BATCH: wrote %s, kept %s", len(generated), len(saved))
@@ -629,69 +747,84 @@ def quiz(
     student_id = student_id.strip() or "anonymous"
     if body.diagnostic:
         source_signature = get_ready_source_signature()
-        existing_set_size = get_diagnostic_question_count(source_signature)
-        if existing_set_size < 5:
+        selected = get_diagnostic_set_questions(source_signature, student_id)
+        set_size = get_diagnostic_set_size(source_signature)
+        batch_reason = ""
+
+        if set_size == 0:
+            available = get_available_mcq_questions(student_id)
             chunks = get_quiz_chunks([], [])
-            if not chunks:
-                raise HTTPException(
-                    status_code=400,
-                    detail="No study material for these topics.",
+            all_topics = {
+                chunk["metadata"].get("topic") or "General"
+                for chunk in chunks
+            }
+            all_topics.update(question["topic"] for question in available)
+            selected = _spread_questions(available, 5, unique_topics_only=True)
+            needed_topic_count = min(5, len(all_topics))
+
+            if len(selected) < needed_topic_count or len(available) < 5:
+                if chunks:
+                    existing_topics = {question["topic"] for question in selected}
+                    generation_topics = sorted(
+                        all_topics - existing_topics or all_topics,
+                        key=str.casefold,
+                    )
+                    generation_chunks = [
+                        chunk
+                        for chunk in chunks
+                        if (chunk["metadata"].get("topic") or "General")
+                        in generation_topics
+                    ]
+                    try:
+                        _verified_quiz_batch(
+                            generation_chunks,
+                            generation_topics,
+                            ["mcq"],
+                            "mixed",
+                            diagnostic=True,
+                            diagnostic_source_signature=source_signature,
+                        )
+                    except (TextBudgetExceeded, GeminiQuotaError) as exc:
+                        batch_reason = str(exc)
+                        logger.error("QUIZ RESULT: diagnostic generation stopped: %s", batch_reason)
+                    except (GeminiError, HTTPException) as exc:
+                        batch_reason = str(getattr(exc, "detail", exc))
+                        logger.error("QUIZ RESULT: diagnostic generation failed: %s", batch_reason)
+                    available = get_available_mcq_questions(student_id)
+                    selected = _spread_questions(
+                        available,
+                        5,
+                        unique_topics_only=True,
+                    )
+                elif not selected:
+                    batch_reason = "No study material or verified MCQ questions are available."
+
+            if len({question["topic"] for question in selected}) >= len(all_topics):
+                selected = _spread_questions(available, 5)
+            if len(selected) >= 3:
+                save_diagnostic_set(
+                    source_signature,
+                    [question["id"] for question in selected],
                 )
-            topics = sorted(
-                {chunk["metadata"].get("topic") or "General" for chunk in chunks}
+        elif len(selected) < 5:
+            # Supplement questions a student already saw with unseen pool questions.
+            selected = _spread_questions(
+                selected + get_available_mcq_questions(student_id),
+                5,
             )
-            try:
-                _verified_quiz_batch(
-                    chunks,
-                    topics,
-                    ["mcq"],
-                    "mixed",
-                    diagnostic=True,
-                    diagnostic_source_signature=source_signature,
-                )
-            except (TextBudgetExceeded, GeminiQuotaError) as exc:
-                raise HTTPException(
-                    status_code=429,
-                    detail="Gemini text-call budget or quota is exhausted. Try again later.",
-                ) from exc
-            except GeminiError as exc:
-                detail = str(exc)
-                if exc.error_code == 504:
-                    detail = "Gemini timed out while generating the quiz. Please try again."
-                logger.error("Gemini could not generate diagnostic questions: %s", exc)
-                raise HTTPException(status_code=502, detail=detail) from exc
-        existing = get_unseen_questions(
-            student_id,
-            [],
-            [],
-            ["mcq"],
-            "mixed",
-            diagnostic=True,
-            diagnostic_source_signature=source_signature,
-        )
-        if len(existing) < 5:
-            if existing_set_size >= 5:
-                raise HTTPException(
-                    status_code=409,
-                    detail="You have already used this starter quiz.",
-                )
+
+        logger.info("QUIZ RESULT: kept %s, needed 5", len(selected))
+        if len(selected) < 3:
+            reason = batch_reason or "Fewer than three verified MCQ questions are available."
             raise HTTPException(
                 status_code=502,
-                detail="Gemini could not create five verified diagnostic questions.",
+                detail=f"Could not create a starter quiz: {reason}",
             )
-        by_topic: dict[str, list[dict]] = {}
-        for question in existing:
-            by_topic.setdefault(question["topic"], []).append(question)
-        selected = []
-        while len(selected) < 5 and any(by_topic.values()):
-            for topic in sorted(by_topic):
-                if by_topic[topic] and len(selected) < 5:
-                    selected.append(by_topic[topic].pop(0))
         served = serve_questions(student_id, [question["id"] for question in selected])
-        if len(served) != 5:
+        if len(served) < 3:
             raise HTTPException(
-                status_code=409,
-                detail="You have already used this starter quiz.",
+                status_code=502,
+                detail="Could not create a starter quiz: fewer than three unseen questions remain.",
             )
         return [_public_question(question) for question in served]
 

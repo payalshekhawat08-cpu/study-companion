@@ -222,6 +222,17 @@ def initialize_store():
             """
         )
         connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS diagnostic_set_questions (
+                source_signature TEXT NOT NULL,
+                question_id TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                PRIMARY KEY (source_signature, question_id),
+                UNIQUE (source_signature, position)
+            )
+            """
+        )
+        connection.execute(
             "CREATE INDEX IF NOT EXISTS questions_source_file_id "
             "ON questions (source_file_id)"
         )
@@ -671,6 +682,78 @@ def get_diagnostic_question_count(source_signature: str) -> int:
             (source_signature,),
         ).fetchone()
     return row[0]
+
+
+def get_diagnostic_set_questions(
+    source_signature: str,
+    student_id: str,
+) -> list[dict]:
+    with sqlite3.connect(DATABASE_PATH) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT q.*
+            FROM diagnostic_set_questions AS ds
+            JOIN questions AS q ON q.id = ds.question_id
+            JOIN sources AS s ON s.file_id = q.source_file_id
+            LEFT JOIN student_questions AS sq
+                ON sq.question_id = q.id AND sq.student_id = ?
+            WHERE ds.source_signature = ?
+                AND s.status = 'ready'
+                AND sq.question_id IS NULL
+            ORDER BY ds.position
+            """,
+            (student_id, source_signature),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_diagnostic_set_size(source_signature: str) -> int:
+    with sqlite3.connect(DATABASE_PATH) as connection:
+        row = connection.execute(
+            "SELECT COUNT(*) FROM diagnostic_set_questions WHERE source_signature = ?",
+            (source_signature,),
+        ).fetchone()
+    return row[0]
+
+
+def get_available_mcq_questions(student_id: str) -> list[dict]:
+    with sqlite3.connect(DATABASE_PATH) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT q.*
+            FROM questions AS q
+            JOIN sources AS s ON s.file_id = q.source_file_id
+            LEFT JOIN student_questions AS sq
+                ON sq.question_id = q.id AND sq.student_id = ?
+            WHERE q.type = 'mcq'
+                AND s.status = 'ready'
+                AND sq.question_id IS NULL
+            ORDER BY q.created_at, q.id
+            """,
+            (student_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def save_diagnostic_set(source_signature: str, question_ids: list[str]):
+    with sqlite3.connect(DATABASE_PATH) as connection:
+        next_position = connection.execute(
+            "SELECT COALESCE(MAX(position), -1) + 1 "
+            "FROM diagnostic_set_questions WHERE source_signature = ?",
+            (source_signature,),
+        ).fetchone()[0]
+        for question_id in question_ids:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO diagnostic_set_questions
+                    (source_signature, question_id, position)
+                VALUES (?, ?, ?)
+                """,
+                (source_signature, question_id, next_position),
+            )
+            next_position += 1
 
 
 def get_unseen_questions(

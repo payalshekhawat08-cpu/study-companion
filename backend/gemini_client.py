@@ -90,7 +90,7 @@ def _error_code(exc: Exception):
 
 
 def _is_retryable(exc: Exception, code: int | None) -> bool:
-    if code == 429:
+    if code in {429, 502, 504}:
         return False
     exception_type = type(exc).__name__.lower()
     if (
