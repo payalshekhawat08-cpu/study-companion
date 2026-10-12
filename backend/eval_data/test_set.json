@@ -1,0 +1,42 @@
+[
+  {
+    "id": "binary-search-prerequisite",
+    "question": "What condition must an array meet before binary search can be used?",
+    "ground_truth": "The array must be sorted.",
+    "expected_grounded": true,
+    "expected_source": "DS UNIT 5 (1).pdf",
+    "expected_location": "page 3"
+  },
+  {
+    "id": "bubble-sort-pass",
+    "question": "During a bubble sort pass, what is done when two adjacent elements are in the wrong order?",
+    "ground_truth": "The adjacent elements are swapped.",
+    "expected_grounded": true,
+    "expected_source": "DS UNIT 5 (1).pdf",
+    "expected_location": "page 10"
+  },
+  {
+    "id": "computer-hardware-software",
+    "question": "How do hardware and software differ in a computer system?",
+    "ground_truth": "Hardware is the physical parts you can touch, while software is the programs and instructions that run on a computer.",
+    "expected_grounded": true,
+    "expected_source": "Basic_Computer_Presentation.pptx",
+    "expected_location": "slide 4"
+  },
+  {
+    "id": "supervised-machine-learning",
+    "question": "What does supervised machine learning have in its training data that unsupervised learning does not?",
+    "ground_truth": "Supervised learning has desired outcomes ready in its training data; unsupervised learning has no defined outcome parameters.",
+    "expected_grounded": true,
+    "expected_source": "YouTube 9bdJ3KsIUwQ",
+    "expected_location": "240 seconds"
+  },
+  {
+    "id": "off-topic-photosynthesis",
+    "question": "How does photosynthesis convert sunlight into chemical energy?",
+    "ground_truth": "This topic is not covered by the study material.",
+    "expected_grounded": false,
+    "expected_source": null,
+    "expected_location": null
+  }
+]

@@ -1,0 +1,139 @@
+{
+  "evaluator": "RAGAS-style judge",
+  "evaluator_note": "The installed RAGAS package cannot be imported: No module named 'langchain_community.chat_models.vertexai'",
+  "mode": "dry run",
+  "calls": {
+    "query_embeddings_used": 0,
+    "text_calls_used": 0,
+    "total_gemini_calls_used": 0,
+    "text_call_budget_required": 6,
+    "text_daily_budget": 20
+  },
+  "questions": [
+    {
+      "id": "binary-search-prerequisite",
+      "question": "What condition must an array meet before binary search can be used?",
+      "ground_truth": "The array must be sorted.",
+      "expected_grounded": true,
+      "expected_source": "DS UNIT 5 (1).pdf",
+      "expected_location": "page 3",
+      "answer": "The array must be sorted.",
+      "grounded": true,
+      "citations": [
+        {
+          "source_file": "DS UNIT 5 (1).pdf",
+          "location": "page 3",
+          "excerpt": "The array must be sorted."
+        }
+      ],
+      "scores": {
+        "faithfulness": 0.95,
+        "answer_relevancy": 0.9,
+        "context_precision": 0.9,
+        "context_recall": 0.95
+      },
+      "judge_reason": "Fake dry-run score; no Gemini request was made."
+    },
+    {
+      "id": "bubble-sort-pass",
+      "question": "During a bubble sort pass, what is done when two adjacent elements are in the wrong order?",
+      "ground_truth": "The adjacent elements are swapped.",
+      "expected_grounded": true,
+      "expected_source": "DS UNIT 5 (1).pdf",
+      "expected_location": "page 10",
+      "answer": "The adjacent elements are swapped.",
+      "grounded": true,
+      "citations": [
+        {
+          "source_file": "DS UNIT 5 (1).pdf",
+          "location": "page 10",
+          "excerpt": "The adjacent elements are swapped."
+        }
+      ],
+      "scores": {
+        "faithfulness": 0.95,
+        "answer_relevancy": 0.9,
+        "context_precision": 0.9,
+        "context_recall": 0.95
+      },
+      "judge_reason": "Fake dry-run score; no Gemini request was made."
+    },
+    {
+      "id": "computer-hardware-software",
+      "question": "How do hardware and software differ in a computer system?",
+      "ground_truth": "Hardware is the physical parts you can touch, while software is the programs and instructions that run on a computer.",
+      "expected_grounded": true,
+      "expected_source": "Basic_Computer_Presentation.pptx",
+      "expected_location": "slide 4",
+      "answer": "Hardware is the physical parts you can touch, while software is the programs and instructions that run on a computer.",
+      "grounded": true,
+      "citations": [
+        {
+          "source_file": "Basic_Computer_Presentation.pptx",
+          "location": "slide 4",
+          "excerpt": "Hardware is the physical parts you can touch, while software is the programs and instructions that run on a computer."
+        }
+      ],
+      "scores": {
+        "faithfulness": 0.95,
+        "answer_relevancy": 0.9,
+        "context_precision": 0.9,
+        "context_recall": 0.95
+      },
+      "judge_reason": "Fake dry-run score; no Gemini request was made."
+    },
+    {
+      "id": "supervised-machine-learning",
+      "question": "What does supervised machine learning have in its training data that unsupervised learning does not?",
+      "ground_truth": "Supervised learning has desired outcomes ready in its training data; unsupervised learning has no defined outcome parameters.",
+      "expected_grounded": true,
+      "expected_source": "YouTube 9bdJ3KsIUwQ",
+      "expected_location": "240 seconds",
+      "answer": "Supervised learning has desired outcomes ready in its training data; unsupervised learning has no defined outcome parameters.",
+      "grounded": true,
+      "citations": [
+        {
+          "source_file": "YouTube 9bdJ3KsIUwQ",
+          "location": "240 seconds",
+          "excerpt": "Supervised learning has desired outcomes ready in its training data; unsupervised learning has no defined outcome parameters."
+        }
+      ],
+      "scores": {
+        "faithfulness": 0.95,
+        "answer_relevancy": 0.9,
+        "context_precision": 0.9,
+        "context_recall": 0.95
+      },
+      "judge_reason": "Fake dry-run score; no Gemini request was made."
+    },
+    {
+      "id": "off-topic-photosynthesis",
+      "question": "How does photosynthesis convert sunlight into chemical energy?",
+      "ground_truth": "This topic is not covered by the study material.",
+      "expected_grounded": false,
+      "expected_source": null,
+      "expected_location": null,
+      "answer": "This isn’t covered in your material.",
+      "grounded": false,
+      "citations": [],
+      "scores": {
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.9,
+        "context_precision": 0.0,
+        "context_recall": 0.0
+      },
+      "judge_reason": "Fake dry-run score; no Gemini request was made."
+    }
+  ],
+  "averages": {
+    "faithfulness": 0.96,
+    "answer_relevancy": 0.9,
+    "context_precision": 0.72,
+    "context_recall": 0.76
+  },
+  "off_topic": {
+    "id": "off-topic-photosynthesis",
+    "grounded": false,
+    "status": "PASS"
+  }
+}

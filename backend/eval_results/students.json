@@ -1,0 +1,109 @@
+{
+  "seed": 42,
+  "students": [
+    {
+      "type": "weak",
+      "student_id": "sim_weak_e9d65650",
+      "correct_probability": 0.3,
+      "mastery_before": {
+        "Artificial Intelligence": 0.3,
+        "Binary Search": 0.3,
+        "Bubble Sort": 0.3,
+        "Computer Basics": 0.3,
+        "Computer Components": 0.3,
+        "Hardware and Software": 0.3,
+        "Heap Sort": 0.3,
+        "How Computers Work": 0.3,
+        "Insertion Sort": 0.3,
+        "Merge Sort": 0.3
+      },
+      "mastery_after": {
+        "Artificial Intelligence": 0.7097560975609757,
+        "Binary Search": 0.19322033898305085,
+        "Bubble Sort": 0.7097560975609757,
+        "Computer Basics": 0.19322033898305085,
+        "Computer Components": 0.19322033898305085,
+        "Hardware and Software": 0.7097560975609757,
+        "Heap Sort": 0.19322033898305085,
+        "How Computers Work": 0.7097560975609757,
+        "Insertion Sort": 0.19322033898305085,
+        "Merge Sort": 0.40651308947731174
+      },
+      "average_mastery_gain": 0.12116391746364688,
+      "questions_served": 15,
+      "repeated_questions": 0,
+      "repetition_rate_percent": 0.0,
+      "sessions_completed": 3,
+      "pool_exhausted": false,
+      "pool_status": "available"
+    },
+    {
+      "type": "average",
+      "student_id": "sim_average_e9d65650",
+      "correct_probability": 0.6,
+      "mastery_before": {
+        "Algorithm Efficiency": 0.3,
+        "Binary Search": 0.3,
+        "Bubble Sort": 0.3,
+        "Computer Basics": 0.3,
+        "Hardware and Software": 0.3,
+        "Heap Sort": 0.3,
+        "How Computers Work": 0.3,
+        "Insertion Sort": 0.3,
+        "Merge Sort": 0.3
+      },
+      "mastery_after": {
+        "Algorithm Efficiency": 0.7097560975609757,
+        "Binary Search": 0.7097560975609757,
+        "Bubble Sort": 0.19322033898305085,
+        "Computer Basics": 0.19322033898305085,
+        "Hardware and Software": 0.7097560975609757,
+        "Heap Sort": 0.19322033898305085,
+        "How Computers Work": 0.7097560975609757,
+        "Insertion Sort": 0.7097560975609757,
+        "Merge Sort": 0.7179126794804034
+      },
+      "average_mastery_gain": 0.23848379824827048,
+      "questions_served": 15,
+      "repeated_questions": 0,
+      "repetition_rate_percent": 0.0,
+      "sessions_completed": 3,
+      "pool_exhausted": false,
+      "pool_status": "available"
+    },
+    {
+      "type": "strong",
+      "student_id": "sim_strong_e9d65650",
+      "correct_probability": 0.85,
+      "mastery_before": {
+        "Algorithm Efficiency": 0.3,
+        "Binary Search": 0.3,
+        "Bubble Sort": 0.3,
+        "Computer Basics": 0.3,
+        "Computer Components": 0.3,
+        "Hardware and Software": 0.3,
+        "Heap Sort": 0.3,
+        "How Computers Work": 0.3,
+        "Merge Sort": 0.3
+      },
+      "mastery_after": {
+        "Algorithm Efficiency": 0.7097560975609757,
+        "Binary Search": 0.7097560975609757,
+        "Bubble Sort": 0.7097560975609757,
+        "Computer Basics": 0.19322033898305085,
+        "Computer Components": 0.7097560975609757,
+        "Hardware and Software": 0.7097560975609757,
+        "Heap Sort": 0.7097560975609757,
+        "How Computers Work": 0.7097560975609757,
+        "Merge Sort": 0.9364485981308411
+      },
+      "average_mastery_gain": 0.3775512911156358,
+      "questions_served": 15,
+      "repeated_questions": 0,
+      "repetition_rate_percent": 0.0,
+      "sessions_completed": 3,
+      "pool_exhausted": false,
+      "pool_status": "available"
+    }
+  ]
+}
