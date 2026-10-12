@@ -105,5 +105,5 @@ Example labels: "Textbook p.12", "Lecture 1, 14:32".
   (needed for simulated students in the evaluation).
 
 - ## Current status (update after every finished step)
-- Backend: ingestion of PDF, slides and YouTube, /library, /topics and grounded /ask work and are tested. Next: quizzes, /quiz/answer, learner model and /mastery.
+- Backend: ingestion (PDF, slides, YouTube), /ask, /quiz, /quiz/answer, learner model, /mastery and the starter quiz are built and tested. Evaluation scripts are ready; the real RAGAS-style run is pending the daily Gemini reset.
 - Frontend: building from Frontend/FRONTEND_PLAN.md, phase by phase, with mock data (teammate updates this line).
