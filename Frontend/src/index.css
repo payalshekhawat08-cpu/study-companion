@@ -41,10 +41,31 @@
   box-sizing: border-box;
 }
 
+html,
 body {
+  width: 100%;
   min-width: 320px;
   min-height: 100vh;
   margin: 0;
+  overflow-x: clip;
+}
+
+#root,
+.app-layout,
+.main-column,
+.page-content,
+.welcome-page,
+.welcome-panel,
+.dashboard-screen,
+.library-screen,
+.chat-screen,
+.quiz-screen,
+.course-map-screen {
+  min-width: 0;
+}
+
+:where(p, h1, h2, h3, span, small, strong, li, label, button, summary) {
+  overflow-wrap: anywhere;
 }
 
 button,
@@ -178,10 +199,17 @@ select {
 
 .topbar-title {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 10px;
   font-size: 14px;
   font-weight: 500;
+}
+
+.topbar-title span,
+.profile-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .topbar-title svg {
@@ -593,6 +621,7 @@ select {
   font-size: 13px;
   line-height: 1.65;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .chat-panel {
@@ -731,6 +760,7 @@ select {
 }
 
 .chat-message {
+  min-width: 0;
   max-width: 100%;
 }
 
@@ -809,6 +839,7 @@ select {
 }
 
 .citation-chip span {
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 
@@ -1268,6 +1299,7 @@ select {
 
 .quiz-option {
   display: flex;
+  min-width: 0;
   min-height: 48px;
   align-items: center;
   gap: 12px;
@@ -1288,6 +1320,11 @@ select {
 
 .quiz-option:disabled {
   cursor: default;
+}
+
+.quiz-option > span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .option-letter {
@@ -1357,6 +1394,7 @@ select {
   font-size: 12px;
   line-height: 1.6;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .quiz-feedback .quiz-citation {
@@ -2153,7 +2191,10 @@ select {
 
 .chart-wrap {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   margin-top: 16px;
+  overflow-x: auto;
 }
 
 .weak-topic-list {
@@ -2198,13 +2239,32 @@ select {
 }
 
 @media (max-width: 767px) {
+  button {
+    min-height: 40px;
+  }
+
+  .page-content {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
   .page-content:has(.quiz-screen) {
     padding: 12px;
   }
 
   .quiz-workspace {
     min-height: calc(100dvh - 148px);
+    width: 100%;
+    max-width: 100%;
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .quiz-panel,
+  .quiz-setup {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    margin-inline: auto;
   }
 
   .quiz-workspace .source-viewer-empty {
@@ -2223,11 +2283,91 @@ select {
 
   .quiz-choice-row {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 7px;
+  }
+
+  .quiz-fieldset,
+  .quiz-radio-option,
+  .quiz-check-option {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .quiz-radio-option,
+  .quiz-check-option {
+    min-height: 40px;
+  }
+
+  .quiz-radio-option span,
+  .quiz-check-option span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .quiz-check-list.topics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .quiz-progress-header {
+    flex-wrap: wrap;
+    gap: 6px 12px;
+  }
+
+  .quiz-option {
+    align-items: flex-start;
+  }
+
+  .quiz-option > span:last-child,
+  .quiz-feedback,
+  .not-covered-card {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .topic-result-row {
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  .topic-counts {
+    display: flex;
+    flex-wrap: wrap;
+    min-width: 0;
+    gap: 5px 10px;
+  }
+
+  .result-chips,
+  .quiz-result-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .quiz-result-actions > button {
+    max-width: 100%;
+    white-space: normal;
   }
 
   .page-content:has(.library-screen) {
     padding: 22px 14px;
+  }
+
+  .library-content,
+  .library-heading > div,
+  .library-list-heading > div {
+    min-width: 0;
+  }
+
+  .library-heading,
+  .library-list-heading {
+    flex-wrap: wrap;
+  }
+
+  .library-source-count,
+  .library-refreshing {
+    max-width: 100%;
+    overflow-wrap: anywhere;
   }
 
   .library-dropzone {
@@ -2239,15 +2379,78 @@ select {
     flex-wrap: wrap;
   }
 
+  .source-item-details {
+    min-width: 0;
+    flex-basis: calc(100% - 46px);
+  }
+
   .source-item-actions {
     width: 100%;
+    min-width: 0;
+    flex-wrap: wrap;
     justify-content: flex-end;
     padding-left: 46px;
   }
 
   .source-action {
-    min-height: 34px;
+    min-height: 40px;
     padding: 0 11px;
+  }
+
+  .source-topic-chip {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .chat-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .chat-toolbar > div {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .source-filter {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .source-filter-menu {
+    max-width: calc(100vw - 32px);
+  }
+
+  .chat-input-form,
+  .chat-message,
+  .message-body,
+  .source-viewer-open .viewer-content {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .citation-list,
+  .follow-up-list,
+  .quiz-tags,
+  .source-topic-list {
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+
+  .citation-chip,
+  .follow-up-chip {
+    max-width: 100%;
+    min-height: 40px;
+  }
+
+  .course-map-open,
+  .course-map-back,
+  .course-map-message button {
+    min-height: 40px;
+  }
+
+  .course-map-scroll {
+    max-width: 100%;
+    overflow-x: auto;
   }
 
   .dashboard-grid {
@@ -2256,10 +2459,17 @@ select {
   }
 
   .dashboard-heading {
-    align-items: center;
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .dashboard-heading > div:first-child {
+    min-width: 0;
+    flex: 1 1 100%;
   }
 
   .course-map-open {
+    flex: 0 1 auto;
     padding: 0 9px;
     font-size: 11px;
   }
@@ -2269,12 +2479,44 @@ select {
   }
 
   .streak-indicator {
+    min-width: 0;
+    max-width: 100%;
+    flex: 0 1 auto;
+    flex-wrap: wrap;
     padding: 7px 9px;
     font-size: 10px;
   }
 
+  .dashboard-card-heading > div:last-child,
+  .dashboard-section-heading > div:last-child,
+  .weak-topic-list li > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .weak-topic-list li {
+    flex-wrap: wrap;
+  }
+
+  .chart-wrap {
+    overflow-x: auto;
+  }
+
+  .quiz-setup,
+  .quiz-taking,
+  .quiz-results {
+    min-width: 0;
+    max-width: 100%;
+  }
+
   .dashboard-card {
     padding: 15px;
+  }
+}
+
+@media (max-width: 480px) {
+  .quiz-settings-row {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
