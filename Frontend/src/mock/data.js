@@ -408,8 +408,13 @@ export async function mockGetMastery() {
 export async function mockGetTopics() {
   await delay();
   return [
-    { name: "Stacks", prerequisites: [] },
-    { name: "Queues", prerequisites: [] },
-    { name: "Sorting", prerequisites: ["Queues"] },
+    { name: "Arrays", prerequisites: [] },
+    { name: "Linked Lists", prerequisites: [] },
+    { name: "Stacks", prerequisites: ["Arrays"] },
+    { name: "Queues", prerequisites: ["Arrays"] },
+    { name: "Trees", prerequisites: ["Linked Lists"] },
+    { name: "Graphs", prerequisites: ["Trees"] },
+    { name: "Sorting", prerequisites: ["Arrays"] },
+    { name: "Searching", prerequisites: ["Sorting"] },
   ];
 }

@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -16,6 +17,7 @@ import {
   Flame,
   Library,
 } from "lucide-react";
+import CourseMap from "@/components/CourseMap.jsx";
 
 export default function DashboardScreen({
   name,
@@ -28,6 +30,7 @@ export default function DashboardScreen({
   onAddMaterial,
   progressView = false,
 }) {
+  const [courseMapOpen, setCourseMapOpen] = useState(false);
   const readySources = library.filter((source) => source.status === "ready");
   const chartTopics = [...(mastery?.topics || [])]
     .map((topic) => ({ ...topic, masteryPercent: Math.round(topic.mastery * 100) }))
@@ -42,6 +45,19 @@ export default function DashboardScreen({
     chat: "Chat",
     quiz: "Quiz",
   };
+
+  useEffect(() => {
+    if (!progressView) setCourseMapOpen(false);
+  }, [progressView]);
+
+  if (progressView && courseMapOpen) {
+    return (
+      <CourseMap
+        onBack={() => setCourseMapOpen(false)}
+        onPracticeTopic={onPracticeTopic}
+      />
+    );
+  }
 
   return (
     <section className="dashboard-screen" aria-labelledby="dashboard-title">
@@ -59,6 +75,15 @@ export default function DashboardScreen({
             </p>
           )}
         </div>
+        {progressView && (
+          <button
+            className="course-map-open"
+            type="button"
+            onClick={() => setCourseMapOpen(true)}
+          >
+            Course map
+          </button>
+        )}
         {mastery &&
           Object.prototype.hasOwnProperty.call(mastery, "streak_days") &&
           Number.isFinite(mastery.streak_days) && (
