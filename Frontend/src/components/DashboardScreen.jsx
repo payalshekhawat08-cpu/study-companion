@@ -14,9 +14,10 @@ import {
   ArrowRight,
   BookOpen,
   ChartNoAxesColumnIncreasing,
-  Flame,
   Library,
 } from "lucide-react";
+import FunnyNote from "@/components/FunnyNote.jsx";
+import Mascot from "@/components/Mascot.jsx";
 import CourseMap from "@/components/CourseMap.jsx";
 
 export default function DashboardScreen({
@@ -29,6 +30,7 @@ export default function DashboardScreen({
   onPracticeTopic,
   onAddMaterial,
   progressView = false,
+  mascotsEnabled = true,
 }) {
   const [courseMapOpen, setCourseMapOpen] = useState(false);
   const readySources = library.filter((source) => source.status === "ready");
@@ -55,6 +57,7 @@ export default function DashboardScreen({
       <CourseMap
         onBack={() => setCourseMapOpen(false)}
         onPracticeTopic={onPracticeTopic}
+        mascotsEnabled={mascotsEnabled}
       />
     );
   }
@@ -84,14 +87,6 @@ export default function DashboardScreen({
             Course map
           </button>
         )}
-        {mastery &&
-          Object.prototype.hasOwnProperty.call(mastery, "streak_days") &&
-          Number.isFinite(mastery.streak_days) && (
-            <div className="streak-indicator">
-              <Flame size={16} aria-hidden="true" />
-              <span>{mastery.streak_days} day streak</span>
-            </div>
-          )}
       </header>
 
       <div className="dashboard-grid">
@@ -315,9 +310,15 @@ export default function DashboardScreen({
               </ResponsiveContainer>
             </div>
           ) : (
-            <p className="dashboard-empty">
-              Progress over sessions will appear after at least two study sessions.
-            </p>
+            <div className="dashboard-empty progress-empty">
+              <div className="progress-empty-copy">
+                <p>Progress over sessions will appear after at least two study sessions.</p>
+                <FunnyNote context="progressEmpty" enabled={mascotsEnabled} />
+              </div>
+              {progressView && mascotsEnabled && (
+                <Mascot name="star" mood="thinking" size="sm" />
+              )}
+            </div>
           )}
         </section>
       </div>

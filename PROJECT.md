@@ -104,4 +104,4 @@ Example labels: "Textbook p.12", "Lecture 1, 14:32".
 
 - ## Current status (update after every finished step)
 - Backend: ingestion (PDF, slides, YouTube), /ask, /quiz, /quiz/answer, learner model, /mastery and the starter quiz are built and tested. Evaluation scripts are ready; the real RAGAS-style run is pending the daily Gemini reset.
-- Frontend: building from Frontend/FRONTEND_PLAN.md, phase by phase, with mock data (teammate updates this line).
+- Frontend (owner updates this line): all phases 0-7 are built in React + Vite (app shell and welcome flow, Library with file upload and YouTube links, grounded Chat with citations and source viewer, Quiz with starter quiz, Progress dashboard, Course map). `npm run build` passes. The app works in mock mode (VITE_USE_MOCK=true) and in real mode (VITE_USE_MOCK=false with VITE_API_URL set in Frontend/.env.local). Library, upload and processing status were tested earlier against the real backend. Now connecting the frontend to the real backend to test every screen end to end (Chat, Quiz, Progress, Course map). Still to do: full real-mode test, mobile layout check at 320-390px, Frontend/README.md, demo video.

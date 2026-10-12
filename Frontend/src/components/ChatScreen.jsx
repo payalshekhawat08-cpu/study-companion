@@ -10,6 +10,8 @@ import {
 import { useReducedMotion } from "framer-motion";
 import { toast } from "sonner";
 import { askQuestion } from "@/api";
+import FunnyNote from "@/components/FunnyNote.jsx";
+import Mascot from "@/components/Mascot.jsx";
 import SourceViewer from "./SourceViewer.jsx";
 
 function CitationButton({ citation, onClick }) {
@@ -66,11 +68,20 @@ function NotCoveredCard({
   message,
   onRephrase,
   onBrowseLibrary,
+  mascotsEnabled,
 }) {
   return (
     <div className="not-covered-card">
       <h3>{title}</h3>
-      <p>{message}</p>
+      <div className="not-covered-message-row">
+        <div className="not-covered-message-copy">
+          <p>{message}</p>
+          <FunnyNote context="notCovered" enabled={mascotsEnabled} />
+        </div>
+        {mascotsEnabled && (
+          <Mascot name="charizard" mood="confused" size="sm" />
+        )}
+      </div>
       <div className="not-covered-actions">
         <button className="text-action" type="button" onClick={onRephrase}>
           Rephrase
@@ -92,6 +103,8 @@ export default function ChatScreen({
   initialSourceIds = [],
   onBrowseLibrary,
   onQuizSources,
+  onStudyActivity,
+  mascotsEnabled = true,
 }) {
   const reduceMotion = useReducedMotion();
   const [selectedSourceIds, setSelectedSourceIds] = useState(initialSourceIds);
@@ -128,6 +141,7 @@ export default function ChatScreen({
 
     try {
       const response = await askQuestion(cleanQuestion, selectedSourceIds);
+      onStudyActivity?.();
       setMessages((current) => [
         ...current,
         {
@@ -216,8 +230,12 @@ export default function ChatScreen({
                 <div className="viewer-empty-icon" aria-hidden="true">
                   <MessageCircle size={21} />
                 </div>
+                {mascotsEnabled && (
+                  <Mascot name="star" mood="happy" size="sm" />
+                )}
                 <p>Ask a question about your course material.</p>
                 <span>Answers come from your sources and include citations.</span>
+                <FunnyNote context="emptyChat" enabled={mascotsEnabled} />
               </div>
             )}
 
@@ -244,6 +262,7 @@ export default function ChatScreen({
                     }
                     onRephrase={() => inputRef.current?.focus()}
                     onBrowseLibrary={onBrowseLibrary}
+                    mascotsEnabled={mascotsEnabled}
                   />
                 ) : (
                   <div className="message-body">
@@ -320,7 +339,15 @@ export default function ChatScreen({
             ))}
 
             {waiting && (
-              <p className="searching-message">Searching your material...</p>
+              <div className="searching-row" role="status">
+                {mascotsEnabled && (
+                  <Mascot name="charizard" mood="thinking" size="xs" />
+                )}
+                <div>
+                  <p className="searching-message">Searching your material...</p>
+                  <FunnyNote context="loading" enabled={mascotsEnabled} />
+                </div>
+              </div>
             )}
             <div ref={messagesEndRef} />
           </div>

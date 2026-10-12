@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 import { getMastery, getTopics } from "@/api";
+import FunnyNote from "@/components/FunnyNote.jsx";
+import Mascot from "@/components/Mascot.jsx";
 
 const nodeWidth = 176;
 const nodeHeight = 72;
@@ -35,7 +37,11 @@ function getMasteryStyle(value) {
   return "developing";
 }
 
-export default function CourseMap({ onBack, onPracticeTopic }) {
+export default function CourseMap({
+  onBack,
+  onPracticeTopic,
+  mascotsEnabled = true,
+}) {
   const [topics, setTopics] = useState([]);
   const [mastery, setMastery] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -122,9 +128,13 @@ export default function CourseMap({ onBack, onPracticeTopic }) {
           </button>
         </div>
       ) : topics.length === 0 ? (
-        <p className="course-map-message">
-          No course topics are available yet. Add course material and check back.
-        </p>
+        <div className="course-map-message course-map-empty">
+          <div>
+            <p>No course topics are available yet. Add course material and check back.</p>
+            <FunnyNote context="progressEmpty" enabled={mascotsEnabled} />
+          </div>
+          {mascotsEnabled && <Mascot name="book-bot" mood="thinking" size="sm" />}
+        </div>
       ) : (
         <div className="course-map-scroll" role="region" aria-label="Scrollable course topic map" tabIndex={0}>
           <div

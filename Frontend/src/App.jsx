@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   BookOpen,
   ChartNoAxesColumnIncreasing,
+  Flame,
   House,
   Library,
   MessageCircle,
@@ -11,6 +12,16 @@ import {
 import { Toaster, toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { getLibrary, getMastery, getQuiz } from "@/api";
+import FunnyNote from "@/components/FunnyNote.jsx";
+import Mascot from "@/components/Mascot.jsx";
+import { pickNote } from "@/lib/funnyNotes.js";
+import {
+  getLocalDate,
+  getStreakStatus,
+  readStreak,
+  recordStudyActivity,
+  writeStreak,
+} from "@/lib/streak.js";
 import ChatScreen from "@/components/ChatScreen.jsx";
 import QuizScreen from "@/components/QuizScreen.jsx";
 import DashboardScreen from "@/components/DashboardScreen.jsx";
@@ -34,6 +45,8 @@ const nameKey = "study-companion-name";
 const goalKey = "study-companion-goal";
 const lastScreenKey = "study-companion-last-screen";
 const continueScreenKey = "study-companion-continue-screen";
+const mascotsEnabledKey = "study-companion-mascots-enabled";
+const streakMilestones = [3, 7, 14, 30];
 
 function getSavedValue(key) {
   try {
@@ -41,6 +54,15 @@ function getSavedValue(key) {
   } catch (error) {
     console.error(`Unable to read ${key} from local storage.`, error);
     return "";
+  }
+}
+
+function getMascotsEnabled() {
+  try {
+    return localStorage.getItem(mascotsEnabledKey) !== "false";
+  } catch (error) {
+    console.error("Unable to read mascot preference from local storage.", error);
+    return true;
   }
 }
 
@@ -53,6 +75,7 @@ function Welcome({
   onStartDiagnostic,
   onContinue,
   startingDiagnostic,
+  mascotsEnabled,
 }) {
   const [firstName, setFirstName] = useState("");
   const [goal, setGoal] = useState(goals[0].id);
@@ -61,6 +84,12 @@ function Welcome({
     return (
       <main className="welcome-page">
         <section className="welcome-panel" aria-labelledby="welcome-title">
+          {mascotsEnabled && (
+            <div className="welcome-mascot-row">
+              <Mascot name="charizard" mood="happy" size="md" />
+              <FunnyNote context="welcome" />
+            </div>
+          )}
           <div className="welcome-mark" aria-hidden="true">
             <Sparkles size={20} />
           </div>
@@ -117,6 +146,12 @@ function Welcome({
   return (
     <main className="welcome-page">
       <section className="welcome-panel" aria-labelledby="welcome-title">
+        {mascotsEnabled && (
+          <div className="welcome-mascot-row">
+            <Mascot name="charizard" mood="happy" size="md" />
+            <FunnyNote context="welcome" />
+          </div>
+        )}
         <div className="welcome-mark" aria-hidden="true">
           <Sparkles size={20} />
         </div>
@@ -237,6 +272,133 @@ function PlaceholderScreen({
   );
 }
 
+function StreakControl({
+  streak,
+  mastery,
+  mascotsEnabled,
+  onToggleMascots,
+}) {
+  const [open, setOpen] = useState(false);
+  const [today, setToday] = useState(() => getLocalDate());
+  const controlRef = useRef(null);
+  const triggerRef = useRef(null);
+  const localStatus = getStreakStatus(streak, today);
+  const current =
+    Number.isFinite(mastery?.streak_days)
+      ? mastery.streak_days
+      : localStatus.current;
+  const state = localStatus.studiedToday
+    ? "studied"
+    : current > 0
+      ? "alive"
+      : "neutral";
+  const longest = Math.max(localStatus.longest, current);
+
+  useEffect(() => {
+    let timer;
+    function updateAtMidnight() {
+      setToday(getLocalDate());
+      const now = new Date();
+      const midnight = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate() + 1,
+      );
+      timer = window.setTimeout(updateAtMidnight, midnight.getTime() - now.getTime());
+    }
+
+    const now = new Date();
+    const midnight = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() + 1,
+    );
+    timer = window.setTimeout(
+      updateAtMidnight,
+      midnight.getTime() - now.getTime(),
+    );
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    function handlePointerDown(event) {
+      if (!controlRef.current?.contains(event.target)) setOpen(false);
+    }
+    function handleKeyDown(event) {
+      if (event.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  const statusMessage = localStatus.studiedToday
+    ? "You've studied today. Come back tomorrow to keep it going."
+    : current > 0
+      ? "Study today to keep it going."
+      : "Streak broken. Start a new one today.";
+  const streakBroken = !localStatus.current && streak.lastDate !== null;
+
+  return (
+    <div className="streak-control" ref={controlRef}>
+      <button
+        ref={triggerRef}
+        className={`streak-chip streak-chip-${state}`}
+        type="button"
+        aria-label={`${current} day streak`}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls="streak-details"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <Flame size={16} aria-hidden="true" />
+        <span className="streak-number" key={current}>
+          {current}
+        </span>
+        <span className="streak-label">day streak</span>
+      </button>
+      {open && (
+        <div
+          className="streak-popover"
+          id="streak-details"
+          role="dialog"
+          aria-label="Study streak details"
+        >
+          <p className="streak-popover-title">Your study streak</p>
+          <p>Current streak: {current} {current === 1 ? "day" : "days"}</p>
+          <p>Longest streak: {longest} {longest === 1 ? "day" : "days"}</p>
+          <div className="streak-status-row">
+            <div>
+              <p className="streak-status-message">{statusMessage}</p>
+              {streakBroken && (
+                <FunnyNote context="streakBroken" enabled={mascotsEnabled} />
+              )}
+            </div>
+            {mascotsEnabled && streakBroken && (
+              <Mascot name="charizard" mood="sleepy" size="xs" />
+            )}
+          </div>
+          <label className="mascot-toggle">
+            <input
+              type="checkbox"
+              checked={mascotsEnabled}
+              onChange={(event) => onToggleMascots(event.target.checked)}
+            />
+            <span>Mascots and fun notes</span>
+          </label>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const [name, setName] = useState(() => getSavedValue(nameKey));
   const [goal, setGoal] = useState(() => getSavedValue(goalKey));
@@ -247,6 +409,8 @@ export default function App() {
   );
   const [library, setLibrary] = useState([]);
   const [mastery, setMastery] = useState(null);
+  const [streak, setStreak] = useState(() => readStreak());
+  const [mascotsEnabled, setMascotsEnabled] = useState(getMascotsEnabled);
   const [loading, setLoading] = useState(true);
   const [startingDiagnostic, setStartingDiagnostic] = useState(false);
   const [quizSourceIds, setQuizSourceIds] = useState([]);
@@ -319,6 +483,37 @@ export default function App() {
     navigate("quiz");
   }
 
+  function updateMascotPreference(enabled) {
+    setMascotsEnabled(enabled);
+    try {
+      localStorage.setItem(mascotsEnabledKey, String(enabled));
+    } catch (error) {
+      console.error("Unable to save mascot preference.", error);
+      toast.error("Your mascot preference could not be saved.");
+    }
+  }
+
+  async function recordStudyDay() {
+    const today = getLocalDate();
+    const nextStreak = recordStudyActivity(streak, today);
+    setStreak(nextStreak);
+    writeStreak(nextStreak);
+
+    for (const milestone of streakMilestones) {
+      if (streak.current < milestone && nextStreak.current === milestone) {
+        toast.success(`${milestone}-day study streak! Keep it going.`, {
+          description: mascotsEnabled ? pickNote("streakMilestone") : undefined,
+        });
+      }
+    }
+
+    try {
+      setMastery(await getMastery());
+    } catch (error) {
+      toast.error(error.message || "Could not refresh your study streak.");
+    }
+  }
+
   async function returnToDashboard() {
     try {
       const [sources, progress] = await Promise.all([
@@ -386,6 +581,7 @@ export default function App() {
           onStartDiagnostic={startDiagnostic}
           onContinue={navigate}
           startingDiagnostic={startingDiagnostic}
+          mascotsEnabled={mascotsEnabled}
         />
       </>
     );
@@ -439,6 +635,12 @@ export default function App() {
             <span>{activeScreen.label}</span>
           </div>
           {name && <span className="profile-name">{name}</span>}
+          <StreakControl
+            streak={streak}
+            mastery={mastery}
+            mascotsEnabled={mascotsEnabled}
+            onToggleMascots={updateMascotPreference}
+          />
         </header>
         <main className="page-content">
           {screen === "home" || screen === "progress" ? (
@@ -452,6 +654,7 @@ export default function App() {
               onPracticeTopic={openQuizWithTopic}
               onAddMaterial={() => navigate("library")}
               progressView={screen === "progress"}
+              mascotsEnabled={mascotsEnabled}
             />
           ) : screen === "chat" ? (
             <ChatScreen
@@ -459,6 +662,8 @@ export default function App() {
               initialSourceIds={chatSourceIds}
               onBrowseLibrary={() => navigate("library")}
               onQuizSources={openQuizWithSources}
+              onStudyActivity={recordStudyDay}
+              mascotsEnabled={mascotsEnabled}
             />
           ) : screen === "library" ? (
             <LibraryScreen
@@ -466,6 +671,7 @@ export default function App() {
               loading={loading}
               onSourcesChange={setLibrary}
               onAskAboutSource={openChatWithSource}
+              mascotsEnabled={mascotsEnabled}
             />
           ) : screen === "quiz" ? (
             <QuizScreen
@@ -474,6 +680,8 @@ export default function App() {
               initialTopics={quizTopics}
               starterQuiz={starterQuiz}
               onDashboard={returnToDashboard}
+              onStudyActivity={recordStudyDay}
+              mascotsEnabled={mascotsEnabled}
             />
           ) : (
             <PlaceholderScreen

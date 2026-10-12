@@ -8,6 +8,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { addYoutubeVideo, getLibrary, uploadFile } from "@/api";
+import FunnyNote from "@/components/FunnyNote.jsx";
+import Mascot from "@/components/Mascot.jsx";
 import SourceViewer from "./SourceViewer.jsx";
 
 const acceptedExtensions = new Set([
@@ -63,6 +65,7 @@ export default function LibraryScreen({
   loading,
   onSourcesChange,
   onAskAboutSource,
+  mascotsEnabled = true,
 }) {
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -264,7 +267,11 @@ export default function LibraryScreen({
               <div className="dropzone-icon" aria-hidden="true">
                 <FileText size={19} />
               </div>
+              {mascotsEnabled && (
+                <Mascot name="book-bot" mood="happy" size="sm" />
+              )}
               <p>No materials yet. Add a file or YouTube video to get started.</p>
+              <FunnyNote context="emptyLibrary" enabled={mascotsEnabled} />
             </div>
           ) : (
             <ul className="source-list">

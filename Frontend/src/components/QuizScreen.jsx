@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { getQuiz, submitQuizAnswer } from "@/api";
+import FunnyNote from "@/components/FunnyNote.jsx";
+import Mascot from "@/components/Mascot.jsx";
 import SourceViewer from "./SourceViewer.jsx";
 
 const questionTypes = [
@@ -58,6 +60,8 @@ export default function QuizScreen({
   initialTopics = [],
   starterQuiz = null,
   onDashboard,
+  onStudyActivity,
+  mascotsEnabled = true,
 }) {
   const reduceMotion = useReducedMotion();
   const [phase, setPhase] = useState(starterQuiz ? "taking" : "setup");
@@ -195,6 +199,7 @@ export default function QuizScreen({
     setLoading(true);
     try {
       const result = await submitQuizAnswer(currentQuestion.id, submittedAnswer);
+      onStudyActivity?.();
       setAnswerResult(result);
       setAnswerHistory((history) => [...history, { question: currentQuestion, result }]);
     } catch (error) {
@@ -551,6 +556,22 @@ export default function QuizScreen({
                 {correctCount} of {answerHistory.length} correct
                 <strong>{score}%</strong>
               </p>
+              {mascotsEnabled && (
+                <div className="quiz-result-mascot-row">
+                  <Mascot
+                    name={score >= 80 ? "charizard" : "book-bot"}
+                    mood={
+                      score >= 80 ? "celebrate" : score >= 50 ? "happy" : "thinking"
+                    }
+                    size="sm"
+                  />
+                  <FunnyNote
+                    context={
+                      score >= 80 ? "quizHigh" : score >= 50 ? "quizMid" : "quizLow"
+                    }
+                  />
+                </div>
+              )}
 
               <section className="result-section">
                 <h2>By topic</h2>
