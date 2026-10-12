@@ -95,13 +95,13 @@ cd study-companion
 python -m venv .\venv
 .\venv\Scripts\Activate.ps1
 python -m pip install -r .\requirements.txt
-Copy-Item .\.env.example .\backend\.env
+Copy-Item .\.env.example .\.env
 ```
 
-Open `backend\.env` and replace the placeholder value for `GEMINI_API_KEY` with
-your own Gemini API key. Never commit this file or share the key. Never put a
-Gemini key or other secret in a variable beginning with `VITE_`; those values
-are visible to the browser.
+Open the `.env` file in the project root, next to `README.md`, and replace the
+placeholder value for `GEMINI_API_KEY` with your own Gemini API key. Never
+commit this file or share the key. Never put a Gemini key or other secret in a
+variable beginning with `VITE_`; those values are visible to the browser.
 
 Start the backend from the `backend` directory:
 
