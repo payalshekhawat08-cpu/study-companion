@@ -35,9 +35,7 @@ and a learner model.
   CORSMiddleware (no new package).
 - File upload in FastAPI needs the `python-multipart` package. Check it is in
   requirements.txt before using /upload.
-- Frontend settings (VITE_USE_MOCK, VITE_API_URL) live in Frontend/.env, which must be
-  git-ignored. NEVER put the Gemini key, or any secret, in a variable starting with
-  VITE_ (the browser can read it).
+- Frontend settings (VITE_USE_MOCK, VITE_API_URL) live in Frontend/.env.local, which  must be git-ignored. It holds the backend address only. Never commit it. NEVER put the Gemini key, or any secret, in a variable starting with VITE_ (the browser can read it).
 - Cost safety: use a Gemini key from a project on the free tier (no billing linked).
   Do not retry automatically after a 429. Test with small files first. Run RAGAS
   evaluation on a small test set only (it makes many AI calls).
@@ -105,5 +103,5 @@ Example labels: "Textbook p.12", "Lecture 1, 14:32".
   (needed for simulated students in the evaluation).
 
 - ## Current status (update after every finished step)
-- Backend: ingestion (PDF, slides, YouTube), /ask, /quiz, /quiz/answer, learner model, /mastery and the starter quiz are built and tested. Evaluation scripts are ready; the real RAGAS-style run is pending the daily Gemini reset.
+- Backend:- /health, PDF ingestion (with retries) and grounded /ask work. Next: slides and YouTube ingestion, then quizzes.
 - Frontend: building from Frontend/FRONTEND_PLAN.md, phase by phase, with mock data (teammate updates this line).
