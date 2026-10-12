@@ -8,7 +8,7 @@ from pathlib import Path
 
 import main
 from config import TEXT_DAILY_BUDGET
-from gemini_client import GeminiError, embed_query, generate_json
+from gemini_client import GeminiError, GeminiQuotaError, embed_query, generate_json
 from store import TextBudgetExceeded, list_sources, text_calls_today
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -265,6 +265,36 @@ def make_markdown(results: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def friendly_failure(exc: Exception) -> str:
+    cause = exc
+    while cause is not None:
+        if isinstance(cause, GeminiQuotaError):
+            return (
+                "Gemini quota limit reached (429). Cached answers are kept. "
+                "Run the same command again later."
+            )
+        if isinstance(cause, GeminiError):
+            code = str(cause.error_code)
+            if code == "503":
+                return (
+                    "Google was busy (503). Cached answers are kept. "
+                    "Run the same command again later."
+                )
+            if code in {"502", "504"}:
+                return (
+                    f"Google request failed ({code}). Cached answers are kept. "
+                    "Run the same command again later."
+                )
+            return (
+                f"Gemini evaluation failed: {cause}. Cached answers are kept."
+            )
+        cause = cause.__cause__
+
+    if isinstance(exc, TextBudgetExceeded):
+        return f"{exc} Cached answers are kept."
+    return f"Evaluation stopped: {exc}"
+
+
 def evaluate(real: bool, reuse_answers: bool = False):
     questions = load_test_set()
     total_calls_before = text_calls_today() if real else 0
@@ -449,8 +479,8 @@ def main_cli():
     try:
         results = evaluate(args.real, args.reuse_answers)
     except (GeminiError, GeminiQuotaError, TextBudgetExceeded, RuntimeError, ValueError) as exc:
-        print(f"Evaluation stopped: {exc}", file=sys.stderr)
-        raise SystemExit(1) from exc
+        print(friendly_failure(exc), file=sys.stderr)
+        raise SystemExit(1)
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     (RESULTS_DIR / "ragas.json").write_text(
