@@ -322,6 +322,74 @@ select {
   max-width: 280px;
 }
 
+.welcome-greeting {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 14px;
+  margin-top: 10px;
+}
+
+.welcome-avatar {
+  position: relative;
+  display: block;
+  width: 64px;
+  height: 64px;
+  flex: 0 0 64px;
+  overflow: hidden;
+  border: 2px solid var(--primary);
+  border-radius: 50%;
+  animation: welcome-avatar-float 5s ease-in-out infinite;
+}
+
+.welcome-avatar img,
+.welcome-avatar canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  object-position: center 35%;
+}
+
+.welcome-avatar canvas {
+  display: none;
+}
+
+.welcome-greeting-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.welcome-panel .welcome-greeting-copy h1 {
+  margin: 6px 0 0;
+  font-size: clamp(27px, 8vw, 34px);
+  line-height: 1.15;
+}
+
+.welcome-speech {
+  display: inline-block;
+  max-width: 100%;
+  margin: 7px 0 0;
+  border: 1px solid var(--border);
+  border-radius: 10px 10px 10px 3px;
+  background: var(--raised);
+  color: var(--muted-foreground);
+  padding: 5px 8px;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+@keyframes welcome-avatar-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
 .searching-message,
 .not-covered-message-copy > p:first-child {
   margin: 0;
@@ -632,7 +700,30 @@ select {
 
 @media (max-width: 480px) {
   .welcome-panel {
-    padding: 24px 20px;
+    padding: 20px 18px;
+  }
+
+  .welcome-mark {
+    margin-bottom: 16px;
+  }
+
+  .welcome-greeting {
+    gap: 12px;
+  }
+
+  .welcome-avatar {
+    width: 48px;
+    height: 48px;
+    flex-basis: 48px;
+  }
+
+  .welcome-panel .welcome-greeting-copy h1 {
+    font-size: clamp(26px, 8vw, 32px);
+  }
+
+  .welcome-form {
+    gap: 10px;
+    margin-top: 18px;
   }
 
   .welcome-actions {
@@ -2948,5 +3039,17 @@ select {
 
   .mascot {
     animation: none !important;
+  }
+
+  .welcome-avatar {
+    animation: none;
+  }
+
+  .welcome-avatar img {
+    display: none;
+  }
+
+  .welcome-avatar canvas {
+    display: block;
   }
 }

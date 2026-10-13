@@ -51,6 +51,82 @@ const lastScreenKey = "study-companion-last-screen";
 const continueScreenKey = "study-companion-continue-screen";
 const mascotsEnabledKey = "study-companion-mascots-enabled";
 const streakMilestones = [3, 7, 14, 30];
+const welcomeMessages = [
+  "Study first, flames later.",
+  "Your streak starts today.",
+  "Small steps still count.",
+  "You have got this.",
+];
+
+function WelcomeGreeting({ eyebrow, title, titleId }) {
+  const imageRef = useRef(null);
+  const canvasRef = useRef(null);
+  const [imageFailed, setImageFailed] = useState(false);
+  const [message] = useState(
+    () => welcomeMessages[Math.floor(Math.random() * welcomeMessages.length)],
+  );
+
+  function drawFirstFrame() {
+    try {
+      const image = imageRef.current;
+      const canvas = canvasRef.current;
+      const context = canvas?.getContext("2d");
+      if (!image || !canvas || !context || !image.naturalWidth) return;
+
+      const cropSize = Math.min(image.naturalWidth, image.naturalHeight);
+      const cropX = (image.naturalWidth - cropSize) / 2;
+      const cropY = (image.naturalHeight - cropSize) * 0.35;
+      const outputSize = 128;
+      canvas.width = outputSize;
+      canvas.height = outputSize;
+      context.clearRect(0, 0, outputSize, outputSize);
+      context.save();
+      context.beginPath();
+      context.arc(outputSize / 2, outputSize / 2, outputSize / 2, 0, Math.PI * 2);
+      context.clip();
+      context.drawImage(
+        image,
+        cropX,
+        cropY,
+        cropSize,
+        cropSize,
+        0,
+        0,
+        outputSize,
+        outputSize,
+      );
+      context.restore();
+    } catch {
+      // The animated image remains available if canvas drawing is unsupported.
+    }
+  }
+
+  return (
+    <div className="welcome-greeting">
+      {!imageFailed && (
+        <span className="welcome-avatar" aria-hidden="true">
+          <img
+            ref={imageRef}
+            src="/avatars/welcome-avatar.gif"
+            alt=""
+            width="64"
+            height="64"
+            onLoad={drawFirstFrame}
+            onError={() => setImageFailed(true)}
+          />
+          <canvas ref={canvasRef} width="128" height="128" aria-hidden="true" />
+        </span>
+      )}
+      <div className="welcome-greeting-copy">
+        <p className="eyebrow">{eyebrow}</p>
+        <h1 id={titleId}>{title}</h1>
+        <p className="welcome-speech" aria-hidden="true">
+          {message}
+        </p>
+      </div>
+    </div>
+  );
+}
 
 function normalizeMastery(progress) {
   if (!Array.isArray(progress?.topics)) return null;
@@ -109,7 +185,6 @@ function Welcome({
   onStartDiagnostic,
   onContinue,
   startingDiagnostic,
-  mascotsEnabled,
 }) {
   const [firstName, setFirstName] = useState("");
   const [goal, setGoal] = useState(goals[0].id);
@@ -118,17 +193,14 @@ function Welcome({
     return (
       <main className="welcome-page">
         <section className="welcome-panel" aria-labelledby="welcome-title">
-          {mascotsEnabled && (
-            <div className="welcome-mascot-row">
-              <Mascot name="charizard" mood="happy" size="md" />
-              <FunnyNote context="welcome" />
-            </div>
-          )}
           <div className="welcome-mark" aria-hidden="true">
             <Sparkles size={20} />
           </div>
-          <p className="eyebrow">A good place to begin</p>
-          <h1 id="welcome-title">Welcome, {name}.</h1>
+          <WelcomeGreeting
+            eyebrow="A good place to begin"
+            title={`Welcome, ${name}.`}
+            titleId="welcome-title"
+          />
           {!hasReadySource ? (
             <>
               <p className="welcome-copy">
@@ -180,17 +252,14 @@ function Welcome({
   return (
     <main className="welcome-page">
       <section className="welcome-panel" aria-labelledby="welcome-title">
-        {mascotsEnabled && (
-          <div className="welcome-mascot-row">
-            <Mascot name="charizard" mood="happy" size="md" />
-            <FunnyNote context="welcome" />
-          </div>
-        )}
         <div className="welcome-mark" aria-hidden="true">
           <Sparkles size={20} />
         </div>
-        <p className="eyebrow">Your personal study space</p>
-        <h1 id="welcome-title">Let’s get started.</h1>
+        <WelcomeGreeting
+          eyebrow="Your personal study space"
+          title="Let’s get started."
+          titleId="welcome-title"
+        />
         <p className="welcome-copy">
           A couple of details help us make this space yours.
         </p>
@@ -662,7 +731,6 @@ export default function App() {
           onStartDiagnostic={startDiagnostic}
           onContinue={navigate}
           startingDiagnostic={startingDiagnostic}
-          mascotsEnabled={mascotsEnabled}
         />
       </>
     );
