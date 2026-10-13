@@ -15,6 +15,12 @@ import { getQuiz, submitQuizAnswer } from "@/api";
 import FunnyNote from "@/components/FunnyNote.jsx";
 import Mascot from "@/components/Mascot.jsx";
 import SourceViewer from "./SourceViewer.jsx";
+import {
+  buildLocalProgress,
+  getLocalAnswers,
+  getLocalDate,
+  recordLocalAnswer,
+} from "@/lib/localProgress.js";
 
 const questionTypes = [
   { id: "mcq", label: "Multiple choice" },
@@ -61,6 +67,7 @@ export default function QuizScreen({
   starterQuiz = null,
   onDashboard,
   onStudyActivity,
+  onLocalAnswersChange,
   mascotsEnabled = true,
 }) {
   const reduceMotion = useReducedMotion();
@@ -85,6 +92,9 @@ export default function QuizScreen({
   const [answer, setAnswer] = useState(null);
   const [answerResult, setAnswerResult] = useState(null);
   const [answerHistory, setAnswerHistory] = useState([]);
+  const [baselineAnswers, setBaselineAnswers] = useState(() => getLocalAnswers());
+  const [quizSessionId, setQuizSessionId] = useState(() => crypto.randomUUID());
+  const [sessionAnswers, setSessionAnswers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [activeCitation, setActiveCitation] = useState(null);
 
@@ -115,6 +125,21 @@ export default function QuizScreen({
         .filter(Boolean),
     ),
   ];
+  const previousTopicProgress = new Map(
+    buildLocalProgress(baselineAnswers).topics.map((topic) => [topic.name, topic]),
+  );
+  const currentTopicProgress = new Map(
+    buildLocalProgress([...baselineAnswers, ...sessionAnswers]).topics.map(
+      (topic) => [topic.name, topic],
+    ),
+  );
+  const masteryChanges = Object.keys(topicBreakdown)
+    .map((topic) => ({
+      topic,
+      before: previousTopicProgress.get(topic),
+      after: currentTopicProgress.get(topic),
+    }))
+    .filter((change) => change.before?.attempts > 0 && change.after);
 
   function toggleValue(value, values, setValues) {
     setValues((current) =>
@@ -126,6 +151,9 @@ export default function QuizScreen({
 
   async function loadQuiz(options) {
     setLoading(true);
+    setBaselineAnswers(getLocalAnswers());
+    setQuizSessionId(crypto.randomUUID());
+    setSessionAnswers([]);
     try {
       const result = await getQuiz(options);
       if (!result.length) {
@@ -199,6 +227,17 @@ export default function QuizScreen({
     setLoading(true);
     try {
       const result = await submitQuizAnswer(currentQuestion.id, submittedAnswer);
+      const progressAnswer = {
+        date: getLocalDate(),
+        sessionId: quizSessionId,
+        topic: currentQuestion.topic,
+        difficulty: currentQuestion.difficulty,
+        source_file: currentQuestion.source?.source_file || "",
+        correct: result.correct,
+      };
+      const updatedAnswers = recordLocalAnswer(progressAnswer);
+      onLocalAnswersChange?.(updatedAnswers);
+      setSessionAnswers((answers) => [...answers, progressAnswer]);
       onStudyActivity?.();
       setAnswerResult(result);
       setAnswerHistory((history) => [...history, { question: currentQuestion, result }]);
@@ -588,6 +627,23 @@ export default function QuizScreen({
                 </div>
               </section>
 
+              {masteryChanges.length > 0 && (
+                <section className="result-section">
+                  <h2>Mastery change</h2>
+                  <ul className="mastery-change-list">
+                    {masteryChanges.map(({ topic, before, after }) => (
+                      <li key={topic}>
+                        <span>{topic}</span>
+                        <span>
+                          {Math.round(before.mastery * 100)}% {"->"}{" "}
+                          {Math.round(after.mastery * 100)}%
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
               <section className="result-section">
                 <h2>Weak topics</h2>
                 {weakTopics.length ? (
@@ -631,7 +687,7 @@ export default function QuizScreen({
                   type="button"
                   onClick={onDashboard}
                 >
-                  Go to dashboard <ArrowRight size={16} />
+                  See dashboard <ArrowRight size={16} />
                 </button>
               </div>
             </div>

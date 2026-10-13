@@ -22,6 +22,10 @@ import {
   recordStudyActivity,
   writeStreak,
 } from "@/lib/streak.js";
+import {
+  clearLocalAnswers,
+  getLocalAnswers,
+} from "@/lib/localProgress.js";
 import ChatScreen from "@/components/ChatScreen.jsx";
 import QuizScreen from "@/components/QuizScreen.jsx";
 import DashboardScreen from "@/components/DashboardScreen.jsx";
@@ -47,6 +51,36 @@ const lastScreenKey = "study-companion-last-screen";
 const continueScreenKey = "study-companion-continue-screen";
 const mascotsEnabledKey = "study-companion-mascots-enabled";
 const streakMilestones = [3, 7, 14, 30];
+
+function normalizeMastery(progress) {
+  if (!Array.isArray(progress?.topics)) return null;
+  const topics = progress.topics.filter(
+    (topic) =>
+      typeof topic?.name === "string" &&
+      topic.name.length > 0 &&
+      Number.isFinite(topic.mastery) &&
+      topic.mastery >= 0 &&
+      topic.mastery <= 1,
+  );
+  if (!topics.length) return null;
+
+  return {
+    ...progress,
+    topics,
+    weak: Array.isArray(progress.weak)
+      ? progress.weak.filter((topic) => typeof topic === "string")
+      : [],
+    history: Array.isArray(progress.history)
+      ? progress.history.filter(
+          (point) =>
+            typeof point?.date === "string" &&
+            Number.isFinite(point.mastery) &&
+            point.mastery >= 0 &&
+            point.mastery <= 1,
+        )
+      : [],
+  };
+}
 
 function getSavedValue(key) {
   try {
@@ -409,6 +443,10 @@ export default function App() {
   );
   const [library, setLibrary] = useState([]);
   const [mastery, setMastery] = useState(null);
+  const [masterySource, setMasterySource] = useState("local");
+  const [masteryNotice, setMasteryNotice] = useState("");
+  const [masteryLoading, setMasteryLoading] = useState(true);
+  const [localAnswers, setLocalAnswers] = useState(() => getLocalAnswers());
   const [streak, setStreak] = useState(() => readStreak());
   const [mascotsEnabled, setMascotsEnabled] = useState(getMascotsEnabled);
   const [loading, setLoading] = useState(true);
@@ -420,19 +458,39 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([getLibrary(), getMastery()])
-      .then(([sources, progress]) => {
+    Promise.allSettled([getLibrary(), getMastery()])
+      .then(([libraryResult, masteryResult]) => {
         if (!active) return;
-        setLibrary(sources);
-        setMastery(progress);
-      })
-      .catch((error) => {
-        if (active) {
-          toast.error(error.message || "Could not load your study data.");
+        if (libraryResult.status === "fulfilled") {
+          setLibrary(libraryResult.value);
+        } else {
+          toast.error(
+            libraryResult.reason.message || "Could not load your study data.",
+          );
+        }
+
+        if (masteryResult.status === "fulfilled") {
+          const progress = normalizeMastery(masteryResult.value);
+          setMastery(progress);
+          setMasterySource(progress ? "server" : "local");
+          setMasteryNotice(
+            progress
+              ? ""
+              : "No server progress yet. Showing quiz answers saved on this device.",
+          );
+        } else {
+          setMastery(null);
+          setMasterySource("local");
+          setMasteryNotice(
+            "Server progress is unavailable. Showing quiz answers saved on this device.",
+          );
         }
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (active) {
+          setLoading(false);
+          setMasteryLoading(false);
+        }
       });
 
     return () => {
@@ -452,7 +510,8 @@ export default function App() {
 
   const hasReadySource = library.some((source) => source.status === "ready");
   const hasHistory =
-    mastery?.has_history ?? (mastery ? mastery.topics.length > 0 : false);
+    mastery?.has_history ??
+    (mastery ? mastery.topics.length > 0 : localAnswers.length > 0);
 
   function navigate(nextScreen) {
     if (nextScreen !== "quiz") setStarterQuiz(null);
@@ -507,25 +566,47 @@ export default function App() {
       }
     }
 
+    await refreshMastery();
+  }
+
+  async function refreshMastery() {
     try {
-      setMastery(await getMastery());
-    } catch (error) {
-      toast.error(error.message || "Could not refresh your study streak.");
+      const progress = normalizeMastery(await getMastery());
+      setMastery(progress);
+      setMasterySource(progress ? "server" : "local");
+      setMasteryNotice(
+        progress
+          ? ""
+          : "No server progress yet. Showing quiz answers saved on this device.",
+      );
+    } catch {
+      setMastery(null);
+      setMasterySource("local");
+      setMasteryNotice(
+        "Server progress is unavailable. Showing quiz answers saved on this device.",
+      );
     }
   }
 
   async function returnToDashboard() {
-    try {
-      const [sources, progress] = await Promise.all([
-        getLibrary(),
-        getMastery(),
-      ]);
-      setLibrary(sources);
-      setMastery(progress);
-    } catch (error) {
-      toast.error(error.message || "Could not refresh your progress.");
+    const libraryResult = await getLibrary().then(
+      (sources) => ({ status: "fulfilled", sources }),
+      (error) => ({ status: "rejected", error }),
+    );
+    if (libraryResult.status === "fulfilled") {
+      setLibrary(libraryResult.sources);
+    } else {
+      toast.error(
+        libraryResult.error.message || "Could not refresh your study materials.",
+      );
     }
+    setLocalAnswers(getLocalAnswers());
+    await refreshMastery();
     navigate("home");
+  }
+
+  function resetLocalProgress() {
+    setLocalAnswers(clearLocalAnswers());
   }
 
   function saveWelcome(firstName, selectedGoal) {
@@ -647,12 +728,17 @@ export default function App() {
             <DashboardScreen
               name={name}
               mastery={mastery}
+              dataSource={masterySource}
+              dataNotice={masteryNotice}
+              localAnswers={localAnswers}
               library={library}
-              loading={loading}
+              loading={loading || masteryLoading}
               lastScreen={getSavedValue(continueScreenKey)}
               onNavigate={navigate}
               onPracticeTopic={openQuizWithTopic}
               onAddMaterial={() => navigate("library")}
+              onStartDiagnostic={startDiagnostic}
+              onResetLocalProgress={resetLocalProgress}
               progressView={screen === "progress"}
               mascotsEnabled={mascotsEnabled}
             />
@@ -681,6 +767,7 @@ export default function App() {
               starterQuiz={starterQuiz}
               onDashboard={returnToDashboard}
               onStudyActivity={recordStudyDay}
+              onLocalAnswersChange={setLocalAnswers}
               mascotsEnabled={mascotsEnabled}
             />
           ) : (
