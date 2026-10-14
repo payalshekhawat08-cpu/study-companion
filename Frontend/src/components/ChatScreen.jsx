@@ -245,7 +245,7 @@ export default function ChatScreen({
                 key={message.id}
               >
                 <p className="message-author">
-                  {message.role === "user" ? "You" : "Study Companion"}
+                  {message.role === "user" ? "You" : "BODHIX"}
                 </p>
                 {message.role === "assistant" &&
                 (!message.grounded || message.citations.length === 0) ? (

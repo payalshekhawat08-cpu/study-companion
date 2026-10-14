@@ -193,13 +193,7 @@ function Welcome({
     return (
       <main className="welcome-page">
         <section className="welcome-panel" aria-labelledby="welcome-title">
-          <div className="welcome-brand">
-            <Logo variant="full" size="md" className="welcome-logo-full" />
-            <span className="welcome-logo-compact">
-              <Logo variant="mark" size="sm" />
-              <span aria-hidden="true">Study</span>
-            </span>
-          </div>
+          <Logo variant="full" size="lg" className="logo-welcome" />
           <WelcomeGreeting
             eyebrow="A good place to begin"
             title={`Welcome, ${name}.`}
@@ -256,13 +250,7 @@ function Welcome({
   return (
     <main className="welcome-page">
       <section className="welcome-panel" aria-labelledby="welcome-title">
-        <div className="welcome-brand">
-          <Logo variant="full" size="md" className="welcome-logo-full" />
-          <span className="welcome-logo-compact">
-            <Logo variant="mark" size="sm" />
-            <span aria-hidden="true">Study</span>
-          </span>
-        </div>
+        <Logo variant="full" size="lg" className="logo-welcome" />
         <WelcomeGreeting
           eyebrow="Your personal study space"
           title="Let’s get started."
@@ -368,7 +356,7 @@ function PlaceholderScreen({
 
   return (
     <section className="screen-placeholder" aria-labelledby="screen-title">
-      <p className="eyebrow">Study Companion</p>
+      <p className="eyebrow">BODHIX</p>
       <h1 id="screen-title">{current.title}</h1>
       <p className="welcome-copy">{current.description}</p>
       <div className="placeholder-note">
@@ -757,10 +745,14 @@ export default function App() {
             event.preventDefault();
             navigate("home");
           }}
-          aria-label="Study Companion home"
+          aria-label="BODHIX home"
         >
-          <Logo variant="mark" size="sm" />
-          <span>Study Companion</span>
+          <Logo
+            variant="mark"
+            size="sm"
+            className="logo-mark-decorative"
+          />
+          <span className="brand-wordmark">BODHIX</span>
         </a>
         <p className="nav-label">Workspace</p>
         <nav className="nav-list">
@@ -785,7 +777,7 @@ export default function App() {
       <div className="main-column">
         <header className="topbar">
           <div className="topbar-title">
-            <Logo variant="mark" size="sm" />
+            <Logo variant="mark" size="sm" className="logo-topbar" />
             <span>{activeScreen.label}</span>
           </div>
           {name && <span className="profile-name">{name}</span>}
