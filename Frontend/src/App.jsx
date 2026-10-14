@@ -107,7 +107,7 @@ function WelcomeGreeting({ eyebrow, title, titleId }) {
         <span className="welcome-avatar" aria-hidden="true">
           <img
             ref={imageRef}
-            src="/avatars/welcome-avatar.gif"
+            src="/avatars/glowing_lotus.gif"
             alt=""
             width="64"
             height="64"
