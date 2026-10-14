@@ -4,6 +4,9 @@ AI Study Companion is a web app for the Multimodal AI Hackathon 2026, Track D.
 It turns lecture videos, textbook PDFs and slide decks into a source-cited
 knowledge base, with grounded chat, adaptive quizzes and a learner model.
 
+##Project Documentation
+[Project document link- ](https://canva.link/4cvw3l5319v6g8s)
+
 ## Features
 
 - Ingests PDFs, PowerPoint slides (`.pptx`) and YouTube videos with captions.
