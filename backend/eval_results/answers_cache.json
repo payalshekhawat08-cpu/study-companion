@@ -1,0 +1,60 @@
+{
+  "answers": {
+    "binary-search-prerequisite": {
+      "question": "What condition must an array meet before binary search can be used?",
+      "expected_source": "DS UNIT 5 (1).pdf",
+      "answer": {
+        "answer": "Binary search only works if the array is sorted in ascending or descending order.",
+        "grounded": true,
+        "citations": [
+          {
+            "id": "1f492c34-8efe-4899-929a-453a329b3edd:p3:c0",
+            "label": "DS UNIT 5 (1) p.3",
+            "file_id": "1f492c34-8efe-4899-929a-453a329b3edd",
+            "source_file": "DS UNIT 5 (1).pdf",
+            "source_type": "pdf",
+            "location": 3,
+            "excerpt": "Binary Search  Binary Search is a fast method to search for an item in a sorted list.  It works better than Linear Search, especially for large lists.  It only works if the array is sorted in ascending or descending order.  In Linear Search, if the item is at the end of the array, it takes a..."
+          }
+        ]
+      },
+      "context": [
+        {
+          "chunk_id": "1f492c34-8efe-4899-929a-453a329b3edd:p3:c0",
+          "text": "Binary Search \n \nBinary Search is a fast method to search for an item in a sorted list. \n \nIt works better than Linear Search, especially for large lists. \n \nIt only works if the array is sorted in ascending or descending order. \n \nIn Linear Search, if the item is at the end of the array, it takes a lot of time (worst case). \n \nBinary Search helps to avoid this delay by quickly reducing the search area. \n \nHow Binary Search Works \n1. First, make sure the array is sorted. \n2. Set three variables: \no Beg → index of the first element (usually 0) \no End → index of the last element \no Mid → middle index, calculated as: \nMid = (Beg + End) / 2 \n3. Compare the search value with the element at the Mid index: \no If the value is equal to the middle element → Item is found! \no If the value is les",
+          "source_file": "DS UNIT 5 (1).pdf",
+          "location": 3,
+          "similarity": 0.7275874018669128
+        },
+        {
+          "chunk_id": "1f492c34-8efe-4899-929a-453a329b3edd:p3:c1",
+          "text": "he Mid index: \no If the value is equal to the middle element → Item is found! \no If the value is less than the middle element → Search in the left half of the array \no If the value is greater than the middle element → Search in the right half \n4. Repeat the above steps (keep updating Beg, End, and Mid) until: \no The item is found, or \no The search area becomes empty (no more elements left to check) \nExample \nTo understand the concept of binary search, let us take an array of 10 elements which is as \nunder in ascending order. \n \nNow we are searching the item 85 in the above array. \n \n \nNow at index 4, middle item is 67 which is smaller than required item 85. So we will search in \nright side from middle point. Now, Beg = Mid + 1 = 5, and End will be the same.",
+          "source_file": "DS UNIT 5 (1).pdf",
+          "location": 3,
+          "similarity": 0.7110143899917603
+        },
+        {
+          "chunk_id": "1f492c34-8efe-4899-929a-453a329b3edd:p1:c2",
+          "text": "sult (Whether the mid element is smaller or greater). This \nalgorithm is faster than linear search and takes O(Log n) time. \n \nLinear (Sequential) Search \n \nIt is the simplest way to search for an item in a list or array. \n \nThis method checks each element one by one from the beginning until it finds the desired \nvalue. \n \nIt works well when: \no The list is unsorted \no There's no other way to search efficiently \n \nHowever, it is not the fastest method, especially for large lists. \nHow It Works \n1. Start from the first element of the array. \n2. Compare each element with the value you are searching for. \n3. If a match is found, return the position (index) of that element. \n4. If no match is found after checking all elements, say the value is not present.",
+          "source_file": "DS UNIT 5 (1).pdf",
+          "location": 1,
+          "similarity": 0.694200873374939
+        },
+        {
+          "chunk_id": "1f492c34-8efe-4899-929a-453a329b3edd:p1:c0",
+          "text": "Data Structure \nUNIT V \n1. Searching \nSearching \n \nDefinition: Searching means looking for a specific piece of data within a large collection of data. \nSearching algorithms are essential tools in computer science used to locate specific items within a \ncollection of data. In this tutorial, we are mainly going to focus upon searching in an array. When \nwe search an item in an array, there are two most common algorithms used based on the type of \ninput array. \n \nUnsuccessful Search: If the value is not found, a message is shown, and the search is considered \nunsuccessful. \n \nTime Factor: Searching is often one of the most time-consuming parts of a computer program. \n \nSearch Method Choice Depends On: \no The size of the data \no Type of data \no Data structure (e.g., array, list, tree) \no S",
+          "source_file": "DS UNIT 5 (1).pdf",
+          "location": 1,
+          "similarity": 0.684127688407898
+        },
+        {
+          "chunk_id": "1f492c34-8efe-4899-929a-453a329b3edd:p1:c1",
+          "text": "Depends On: \no The size of the data \no Type of data \no Data structure (e.g., array, list, tree) \no Storage location (RAM or external storage) \n \nTypes of Searching: \n1. Linear (Sequential) Search – Goes through each element one by one. It is used for an \nunsorted array. It mainly does one by one comparison of the item to be search with array \nelements. It takes linear or O(n) Time. \n2. Binary Search – Works on sorted data; repeatedly divides the data to search faster.  \nIt is used for a sorted array. It mainly compares the array's middle element first and if the \nmiddle element is same as input, then it returns. Otherwise it searches in either left half or \nright half based on comparison result (Whether the mid element is smaller or greater). This \nalgorithm is faster than linear search a",
+          "source_file": "DS UNIT 5 (1).pdf",
+          "location": 1,
+          "similarity": 0.6761977076530457
+        }
+      ]
+    }
+  }
+}
