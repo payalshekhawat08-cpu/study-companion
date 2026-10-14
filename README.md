@@ -207,17 +207,14 @@ default command below is a dry run; a real evaluation requires explicit
 - Topic prerequisites for the course map are not generated.
 - Gemini's free tier can return busy (503) errors.
 
-## Team
-
-**Names and roles:** 
-<<<<<<< HEAD
-- Aaliya Rehmaan - System analyst and Requirments Analysis
-- Kashish Vaishnav - QA & Technical Researcher
-- Neha Khatri - frontend devlopment and UI Implementation  
-- Payal Shekhawat - Backend devlopment and API Integration
-=======
+## Team:
 - Aaliya Rehman - System analyst and Requirments Analysis
 - Kashish Vaishnav - QA & Technical Researcher
 - Neha Khatri - frontend development and UI Implementation  
 - Payal Shekhawat - Backend development and API Integration
->>>>>>> 51a5e8e171ca261463854dc29422bff0c654b491
+
+## AI tools used:
+- claude : used for design,analysis and prompt generation
+- co-pilot : used for coding.
+- chatgpt : for suggestion and ideas, logo generation.
+ 
