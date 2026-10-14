@@ -7,11 +7,11 @@ import {
   House,
   Library,
   MessageCircle,
-  Sparkles,
 } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { getLibrary, getMastery, getQuiz } from "@/api";
+import Logo from "@/components/Logo.jsx";
 import FunnyNote from "@/components/FunnyNote.jsx";
 import Mascot from "@/components/Mascot.jsx";
 import { pickNote } from "@/lib/funnyNotes.js";
@@ -193,8 +193,12 @@ function Welcome({
     return (
       <main className="welcome-page">
         <section className="welcome-panel" aria-labelledby="welcome-title">
-          <div className="welcome-mark" aria-hidden="true">
-            <Sparkles size={20} />
+          <div className="welcome-brand">
+            <Logo variant="full" size="md" className="welcome-logo-full" />
+            <span className="welcome-logo-compact">
+              <Logo variant="mark" size="sm" />
+              <span aria-hidden="true">Study</span>
+            </span>
           </div>
           <WelcomeGreeting
             eyebrow="A good place to begin"
@@ -252,8 +256,12 @@ function Welcome({
   return (
     <main className="welcome-page">
       <section className="welcome-panel" aria-labelledby="welcome-title">
-        <div className="welcome-mark" aria-hidden="true">
-          <Sparkles size={20} />
+        <div className="welcome-brand">
+          <Logo variant="full" size="md" className="welcome-logo-full" />
+          <span className="welcome-logo-compact">
+            <Logo variant="mark" size="sm" />
+            <span aria-hidden="true">Study</span>
+          </span>
         </div>
         <WelcomeGreeting
           eyebrow="Your personal study space"
@@ -737,7 +745,6 @@ export default function App() {
   }
 
   const activeScreen = navigation.find((item) => item.id === screen) || navigation[0];
-  const ActiveIcon = activeScreen.icon;
 
   return (
     <div className="app-layout">
@@ -752,9 +759,7 @@ export default function App() {
           }}
           aria-label="Study Companion home"
         >
-          <span className="brand-mark" aria-hidden="true">
-            <BookOpen size={19} />
-          </span>
+          <Logo variant="mark" size="sm" />
           <span>Study Companion</span>
         </a>
         <p className="nav-label">Workspace</p>
@@ -780,7 +785,7 @@ export default function App() {
       <div className="main-column">
         <header className="topbar">
           <div className="topbar-title">
-            <ActiveIcon size={18} aria-hidden="true" />
+            <Logo variant="mark" size="sm" />
             <span>{activeScreen.label}</span>
           </div>
           {name && <span className="profile-name">{name}</span>}
