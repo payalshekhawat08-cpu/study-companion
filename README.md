@@ -210,7 +210,7 @@ default command below is a dry run; a real evaluation requires explicit
 ## Team
 
 **Names and roles:** 
-- Aaliya Rehmaan - System analyst and Requirments Analysis
-- Kashish Vaishnav - QA & Rechnical Researcher
-- Neha Khatri - frontend devlopment and UI Implementation  
-- Payal Shekhawat - Backend devlopment adn API Integration
+- Aaliya Rehman - System analyst and Requirments Analysis
+- Kashish Vaishnav - QA & Technical Researcher
+- Neha Khatri - frontend development and UI Implementation  
+- Payal Shekhawat - Backend development and API Integration
